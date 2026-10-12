@@ -120,6 +120,7 @@ export default function App() {
   );
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [initialLoadError, setInitialLoadError] = useState(false);
   const [authMode, setAuthMode] = useState<"register" | "login">("register");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -177,13 +178,17 @@ export default function App() {
         if (!active) return;
         setKitchens(kitchenData.kitchens);
         setCurrentUser(authData.user);
+        setInitialLoadError(false);
         setCart((current) => current.filter((line) =>
           kitchenData.kitchens.some((kitchen) =>
             kitchen.id === line.kitchenId && kitchen.meals.some((meal) => meal.id === line.mealId),
           ),
         ));
       } catch (error) {
-        if (active) setNotice(error instanceof Error ? error.message : "Could not connect to DZ Kitchen API.");
+        if (active) {
+          setInitialLoadError(true);
+          setNotice(error instanceof Error ? error.message : "Could not connect to DZ Kitchen API.");
+        }
       } finally {
         if (active) setInitialLoading(false);
       }
@@ -689,6 +694,10 @@ export default function App() {
                   </article>
                 ))}
               </div>
+            ) : initialLoading ? (
+              <div className="empty-state"><span>✳</span><h3>Setting the table…</h3><p>Loading kitchen listings and menus.</p></div>
+            ) : initialLoadError ? (
+              <div className="empty-state"><span>!</span><h3>We couldn't load the kitchen list.</h3><p>Check that the API server and database are running, then try again.</p><button className="button button-dark" onClick={() => window.location.reload()}>Try again <span>↻</span></button></div>
             ) : (
               <div className="empty-state">
                 <span>{kitchens.length === 0 ? "✳" : "⌕"}</span>
