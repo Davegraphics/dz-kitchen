@@ -376,8 +376,9 @@ app.post("/api/kitchens/:id/meals", requireAuth, async (req, res, next) => {
   }
 
   try {
-    const kitchenId = req.params.id;
-    if (!(await userOwnsKitchen(req.user!.id, kitchenId))) {
+    const rawKitchenId = req.params.id;
+    const kitchenId = Array.isArray(rawKitchenId) ? rawKitchenId[0] : rawKitchenId;
+    if (!kitchenId || !(await userOwnsKitchen(req.user!.id, kitchenId))) {
       res.status(404).json({ error: "Kitchen not found or you do not have permission to edit it." });
       return;
     }
