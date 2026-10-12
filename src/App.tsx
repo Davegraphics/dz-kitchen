@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 type Meal = {
   id: string;
@@ -303,7 +303,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function saveKitchen(event: React.FormEvent<HTMLFormElement>) {
+  function saveKitchen(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!ownerForm.name.trim() || !ownerForm.area.trim()) {
       notify("Add a kitchen name and location first.");
@@ -341,7 +341,7 @@ export default function App() {
     }
   }
 
-  function saveMeal(event: React.FormEvent<HTMLFormElement>) {
+  function saveMeal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!ownerKitchenId || !mealForm.name.trim() || Number(mealForm.price) <= 0) {
       notify("Enter a meal name and a price greater than zero.");
@@ -400,7 +400,7 @@ export default function App() {
     notify("Menu item removed.");
   }
 
-  function generateIdeas(event: React.FormEvent<HTMLFormElement>) {
+  function generateIdeas(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const prompt = menuPrompt.trim().toLowerCase();
     if (!prompt) {
