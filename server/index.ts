@@ -75,6 +75,14 @@ const authLimiter = rateLimit({
   message: { error: "Too many sign-in attempts. Please try again in 15 minutes." },
 });
 
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Upload limit reached. Please try again later." },
+});
+
 const sessionCookie = {
   httpOnly: true,
   secure: isProduction,
@@ -463,7 +471,7 @@ const imageUpload = multer({
   },
 });
 
-app.post("/api/uploads/images", requireAuth, imageUpload.single("image"), async (req, res, next) => {
+app.post("/api/uploads/images", requireAuth, uploadLimiter, imageUpload.single("image"), async (req, res, next) => {
   if (!cloudinaryConfigured) {
     res.status(503).json({ error: "Cloudinary is not configured yet. Add its credentials to your .env file." });
     return;
@@ -478,6 +486,7 @@ app.post("/api/uploads/images", requireAuth, imageUpload.single("image"), async 
       const stream = cloudinary.uploader.upload_stream(
         {
           folder: "dz-kitchen/" + req.user!.id,
+          public_id: "dz-kitchen/" + req.user!.id + "/" + randomUUID(),
           resource_type: "image",
           allowed_formats: ["jpg", "jpeg", "png", "webp", "avif"],
           transformation: [{ quality: "auto", fetch_format: "auto" }],
