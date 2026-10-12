@@ -1,16 +1,23 @@
 # DZ Kitchen smoke-test checklist
 
 - [ ] App opens at desktop and mobile widths without horizontal overflow.
-- [ ] Kitchen search filters by name, description, and area.
-- [ ] Category filter updates the visible kitchens.
-- [ ] Selecting a kitchen reveals its menu.
+- [ ] Initial load shows a loading state while kitchen data is fetched.
+- [ ] API/database failure shows a retry message instead of the first-kitchen invitation.
+- [ ] A genuinely empty database invites owners to list their first kitchen.
+- [ ] Ctrl+K / Command+K focuses and selects the kitchen search field.
+- [ ] Kitchen search filters by name, description, area, cuisine, and menu items.
+- [ ] Cuisine filter updates the visible kitchens; Clear filters resets both controls.
+- [ ] Selecting a kitchen reveals its menu and unavailable meals cannot be added.
 - [ ] Adding a meal updates the cart count and subtotal.
 - [ ] Adding from another kitchen prompts before replacing the basket.
-- [ ] Checkout refuses to hand off an order when the kitchen has no WhatsApp number configured.
-- [ ] Checkout opens a WhatsApp link containing the selected meals, quantities, and total when a number is configured.
-- [ ] Vendor workspace can create a kitchen.
-- [ ] Vendor workspace can edit kitchen details and WhatsApp contact.
-- [ ] Vendor workspace can add, update availability, and delete menu items.
-- [ ] Refreshing retains demo changes in the same browser.
-- [ ] Menu-idea helper returns suggestions for a submitted prompt.
+- [ ] Checkout validates required customer details and saves an order in Neon.
+- [ ] The order confirmation shows an order reference and total.
+- [ ] If a kitchen has a WhatsApp number, the saved order can be shared with the kitchen.
+- [ ] If no WhatsApp number is configured, the order still saves and the confirmation explains the fallback.
+- [ ] Owner registration and sign-in work; signing out clears the active owner session.
+- [ ] Owner workspace can create and edit a kitchen.
+- [ ] Owner workspace can add, edit, mark sold out, and delete menu items.
+- [ ] Owners see only orders associated with their own kitchens and can update order status.
+- [ ] Kitchen, menu, and order data persist in Neon after refresh and across browsers.
+- [ ] A disabled Cloudinary environment produces an actionable upload error, not a generic server error.
 - [ ] README production caveats are reviewed before deployment.
