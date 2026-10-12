@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 type Meal = {
   id: string;
@@ -130,6 +130,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("discover");
   const [selectedKitchenId, setSelectedKitchenId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [activeCuisine, setActiveCuisine] = useState("All");
   const [cartOpen, setCartOpen] = useState(false);
   const [notice, setNotice] = useState("");
@@ -194,6 +195,18 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem("dz-cart", JSON.stringify(cart));
   }, [cart]);
+
+  useEffect(() => {
+    const handleSearchShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", handleSearchShortcut);
+    return () => window.removeEventListener("keydown", handleSearchShortcut);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -653,7 +666,7 @@ export default function App() {
               <span className="results-count">{visibleKitchens.length} kitchens to explore <span>↗</span></span>
             </div>
             <div className="search-row">
-              <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search kitchens, dishes, or neighbourhoods..." aria-label="Search kitchens" /><kbd>⌘ K</kbd></label>
+              <label className="search-box"><span>⌕</span><input ref={searchInputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search kitchens, dishes, or neighbourhoods..." aria-label="Search kitchens, dishes, or neighbourhoods" /><kbd>Ctrl / ⌘ K</kbd></label>
               <div className="cuisine-chips" aria-label="Filter by cuisine">
                 {cuisines.map((cuisine) => <button key={cuisine} className={activeCuisine === cuisine ? "chip selected" : "chip"} onClick={() => setActiveCuisine(cuisine)}>{cuisine}</button>)}
               </div>
@@ -677,7 +690,16 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              <div className="empty-state"><span>⌕</span><h3>No kitchens found just yet.</h3><p>Try another search or select a different cuisine.</p><button className="button button-outline" onClick={() => { setSearch(""); setActiveCuisine("All"); }}>Clear filters</button></div>
+              <div className="empty-state">
+                <span>{kitchens.length === 0 ? "✳" : "⌕"}</span>
+                <h3>{kitchens.length === 0 ? "Be the first kitchen on the table." : "No kitchens found just yet."}</h3>
+                <p>{kitchens.length === 0
+                  ? "Local cooks can create a storefront, share their menu, and start receiving direct orders."
+                  : "Try another search or select a different cuisine."}</p>
+                {kitchens.length === 0
+                  ? <button className="button button-dark" onClick={() => beginOwner()}>List your kitchen <span>↗</span></button>
+                  : <button className="button button-outline" onClick={() => { setSearch(""); setActiveCuisine("All"); }}>Clear filters</button>}
+              </div>
             )}
           </section>
 

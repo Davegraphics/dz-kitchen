@@ -34,7 +34,7 @@ The API creates the `users`, `kitchens`, `meals`, `customer_orders`, and `custom
 2. From the Cloudinary Console, copy the cloud name, API key, and API secret.
 3. Keep the API secret private. It must never appear in a `VITE_*` environment variable or browser code.
 
-Image uploads are sent to the Express API, validated as supported image formats, limited to 5 MB, and uploaded by the server to Cloudinary. The server returns the secure image URL and Cloudinary public ID, and the database stores those values with each kitchen/menu item.
+Image uploads are sent to the Express API, validated as supported image formats, limited to 5 MB, and uploaded by the server to Cloudinary. The server returns the secure image URL and Cloudinary public ID, and the database stores those values with each kitchen/menu item. If uploads fail with `cloud_name is disabled` (HTTP 401), check Cloudinary email verification and product-environment/account status; having an active API key or populated environment variables does not by itself mean the environment is enabled.
 
 ## 4. Configure local environment (Windows CMD)
 
@@ -72,7 +72,7 @@ npm install
 npm run dev
 ```
 
-This runs the API on http://localhost:3001 and Vite on http://localhost:5173. Open the Vite URL in your browser. Check API status at http://localhost:5173/api/health; it should report Neon as connected and Cloudinary as configured.
+This runs the API on http://localhost:3001 and Vite on http://localhost:5173. Open the Vite URL in your browser. Check API status at http://localhost:5173/api/health; it should report Neon as connected and Cloudinary credentials as present. This checks only that the environment variables exist; it does not prove Cloudinary currently accepts uploads.
 
 When opening **For kitchens**, create an owner account or sign in. Then create a kitchen and use the file picker to upload a storefront photo or meal photo. Kitchen and menu changes are persisted in Neon, so they are available after refresh and across browsers.
 
