@@ -214,7 +214,7 @@ app.get("/api/health", async (_req, res) => {
     res.json({
       status: "ok",
       database: "connected",
-      cloudinary: cloudinaryConfigured ? "configured" : "missing_credentials",
+      cloudinary: cloudinaryConfigured ? "credentials_present" : "missing_credentials",
     });
   } catch {
     res.status(503).json({ status: "error", database: "unavailable" });
@@ -750,6 +750,16 @@ app.delete("/api/uploads/images", requireAuth, async (req, res, next) => {
 });
 
 const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
+  const errorMessage = error instanceof Error ? error.message : "";
+
+  if (/cloud_name is disabled/i.test(errorMessage)) {
+    console.error("[DZ Kitchen API] Cloudinary rejected the upload because this product environment is disabled.");
+    res.status(503).json({
+      error: "Cloudinary has disabled this product environment (401). Check email verification and account status in the Cloudinary Console, or contact Cloudinary Support. Image uploads will work again when Cloudinary re-enables the environment.",
+    });
+    return;
+  }
+
   if (error instanceof multer.MulterError) {
     const message = error.code === "LIMIT_FILE_SIZE"
       ? "Images must be 5 MB or smaller."
