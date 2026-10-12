@@ -201,6 +201,12 @@ h1 em, h2 em { font-family: Georgia, "Times New Roman", serif; font-weight: 500;
 .sidebar-arrow { color: var(--orange); font-size: 13px; }
 .owner-content { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .owner-panel { background: #fffdf8; border: 1px solid #ebe6da; border-radius: 9px; padding: 25px 26px 27px; min-width: 0; }
+.track-page { max-width: 980px; }
+.track-panel { max-width: 680px; margin: 0 auto; }
+.track-result { margin-top: 22px; }
+.track-status-line { display: flex; align-items: center; gap: 10px; padding: 13px 0 3px; color: #858879; font-size: 10px; }
+.track-result-note { margin: 14px 0 0; color: #697260; font-size: 10px; line-height: 1.7; }
+.track-help { max-width: 680px; margin: 16px auto 0; color: #909184; font-size: 10px; line-height: 1.7; }
 .panel-top { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #eee9df; padding-bottom: 17px; margin-bottom: 20px; }
 .panel-top h2 { margin: 8px 0 0; font-size: 22px; letter-spacing: -.9px; }
 .panel-number { color: #e0e5c5; font-size: 25px; font-weight: 800; }
