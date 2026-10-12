@@ -83,6 +83,7 @@ When opening **For kitchens**, create an owner account or sign in. Then create a
 - `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`
 - `GET /api/kitchens` — public kitchens and their menus
 - `POST /api/orders` — validates availability and prices server-side, then saves a customer order
+- `POST /api/orders/lookup` — returns limited order details when the order reference and checkout phone number match
 - `GET /api/owner/orders` — lists orders for kitchens owned by the signed-in user
 - `PATCH /api/owner/orders/:id/status` — changes the status of an order belonging to the signed-in owner's kitchen
 - `POST /api/kitchens`, `PATCH /api/kitchens/:id` — owner-managed kitchen records
@@ -95,7 +96,7 @@ When opening **For kitchens**, create an owner account or sign in. Then create a
 - Owner writes and uploads require a signed-in session. The database enforces kitchen ownership in write queries.
 - Passwords are stored as bcrypt hashes. The session is an HTTP-only cookie; JWT signing secrets and Cloudinary secrets stay server-side.
 - Image uploads allow JPG/JPEG, PNG, WEBP, and AVIF up to 5 MB. Upload requests are rate-limited.
-- Orders are stored with a server-verified item/price snapshot and start in `pending` status. The buyer can then open WhatsApp to notify the kitchen; delivery fees, payment collection, and delivery fulfillment remain coordinated directly with the kitchen. Online payment is not integrated.
+- Orders are stored with a server-verified item/price snapshot and start in `pending` status. Buyers can look up the latest order status using the order reference and the same phone number used at checkout; the lookup returns only basic order details and is rate-limited. The buyer can also open WhatsApp to notify the kitchen; delivery fees, payment collection, and delivery fulfillment remain coordinated directly with the kitchen. Online payment is not integrated.
 - Before production, add verified email/password reset, review CSRF/origin protections and deployment headers, configure HTTPS and a production cookie domain, add backups, monitoring, and automated integration tests.
 - The AppDeploy-hosted site is separate from this repository and is not modified by local development.
 
