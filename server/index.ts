@@ -156,6 +156,7 @@ const kitchenSchema = z.object({
   area: z.string().trim().min(2).max(120),
   cuisine: z.string().trim().min(2).max(60),
   description: text(600),
+  delivery: z.string().trim().min(2).max(80).optional(),
   image: imageUrl,
   imagePublicId: text(300).optional(),
   whatsapp: text(30).optional(),
@@ -343,7 +344,7 @@ app.post("/api/orders", orderLimiter, async (req, res, next) => {
 
   try {
     const data = parsed.data;
-    const customerPhone = data.customerPhone.replace(/[^\\d]/g, "");
+    const customerPhone = data.customerPhone.replace(/[^\d]/g, "");
     if (customerPhone.length < 8 || customerPhone.length > 16) {
       res.status(400).json({ error: "Enter a valid phone number including country code." });
       return;
@@ -426,7 +427,7 @@ app.post("/api/orders", orderLimiter, async (req, res, next) => {
         orderNumber,
         kitchenId: data.kitchenId,
         kitchenName: String(kitchen.name),
-        kitchenWhatsapp: String(kitchen.whatsapp ?? "").replace(/[^\\d]/g, ""),
+        kitchenWhatsapp: String(kitchen.whatsapp ?? "").replace(/[^\d]/g, ""),
         customerName: data.customerName.trim(),
         customerPhone,
         deliveryAddress: data.deliveryAddress.trim(),
@@ -521,11 +522,11 @@ app.post("/api/kitchens", requireAuth, async (req, res, next) => {
     const id = randomUUID();
     await sql`
       INSERT INTO kitchens (
-        id, owner_id, name, area, description, cuisine, image_url,
+        id, owner_id, name, area, description, cuisine, delivery, image_url,
         image_public_id, whatsapp
       ) VALUES (
         ${id}, ${req.user!.id}, ${data.name}, ${data.area}, ${data.description},
-        ${data.cuisine}, ${data.image || ""}, ${data.imagePublicId || ""},
+        ${data.cuisine}, ${data.delivery || "Confirm with kitchen"}, ${data.image || ""}, ${data.imagePublicId || ""},
         ${(data.whatsapp || "").replace(/[^\d]/g, "")}
       )
     `;
@@ -550,6 +551,7 @@ app.patch("/api/kitchens/:id", requireAuth, async (req, res, next) => {
         area = ${data.area},
         description = ${data.description},
         cuisine = ${data.cuisine},
+        delivery = ${data.delivery || "Confirm with kitchen"},
         image_url = ${data.image || ""},
         image_public_id = ${data.imagePublicId || ""},
         whatsapp = ${(data.whatsapp || "").replace(/[^\d]/g, "")},
