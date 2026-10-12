@@ -83,6 +83,14 @@ const uploadLimiter = rateLimit({
   message: { error: "Upload limit reached. Please try again later." },
 });
 
+const orderLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many order attempts. Please try again later." },
+});
+
 const sessionCookie = {
   httpOnly: true,
   secure: isProduction,
@@ -172,6 +180,22 @@ const registrationSchema = z.object({
 const loginSchema = z.object({
   email: z.string().trim().email().max(254),
   password: z.string().min(1).max(128),
+});
+
+const orderSchema = z.object({
+  kitchenId: z.string().uuid(),
+  customerName: z.string().trim().min(2).max(80),
+  customerPhone: z.string().trim().min(7).max(30),
+  deliveryAddress: z.string().trim().min(5).max(400),
+  notes: text(600).optional(),
+  items: z.array(z.object({
+    mealId: z.string().uuid(),
+    quantity: z.number().int().min(1).max(50),
+  })).min(1).max(30),
+});
+
+const orderStatusSchema = z.object({
+  status: z.enum(["pending", "confirmed", "preparing", "ready", "completed", "cancelled"]),
 });
 
 async function userOwnsKitchen(userId: string, kitchenId: string): Promise<boolean> {
@@ -305,6 +329,181 @@ app.get("/api/kitchens", async (_req, res, next) => {
       ORDER BY k.created_at DESC
     `;
     res.json({ kitchens: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/orders", orderLimiter, async (req, res, next) => {
+  const parsed = orderSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check your order details." });
+    return;
+  }
+
+  try {
+    const data = parsed.data;
+    const customerPhone = data.customerPhone.replace(/[^\\d]/g, "");
+    if (customerPhone.length < 8 || customerPhone.length > 16) {
+      res.status(400).json({ error: "Enter a valid phone number including country code." });
+      return;
+    }
+
+    const kitchens = await sql`
+      SELECT id, name, whatsapp
+      FROM kitchens
+      WHERE id = ${data.kitchenId}
+      LIMIT 1
+    `;
+    const kitchen = kitchens[0];
+    if (!kitchen) {
+      res.status(404).json({ error: "This kitchen could not be found." });
+      return;
+    }
+
+    const orderItems: Array<{ id: string; mealId: string; name: string; unitPrice: number; quantity: number }> = [];
+    for (const requested of data.items) {
+      const rows = await sql`
+        SELECT id, name, price
+        FROM meals
+        WHERE id = ${requested.mealId}
+          AND kitchen_id = ${data.kitchenId}
+          AND available = TRUE
+        LIMIT 1
+      `;
+      const meal = rows[0];
+      if (!meal) {
+        res.status(400).json({ error: "One of the selected meals is no longer available. Refresh the menu and try again." });
+        return;
+      }
+      orderItems.push({
+        id: randomUUID(),
+        mealId: String(meal.id),
+        name: String(meal.name),
+        unitPrice: Number(meal.price),
+        quantity: requested.quantity,
+      });
+    }
+
+    const subtotal = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+    if (!Number.isSafeInteger(subtotal) || subtotal <= 0) {
+      res.status(400).json({ error: "The order total is invalid." });
+      return;
+    }
+
+    const orderId = randomUUID();
+    const orderNumber = "DZ-" + new Date().toISOString().slice(2, 10).replace(/-/g, "") + "-" + randomUUID().slice(0, 6).toUpperCase();
+    const snapshotItems = orderItems.map((item) => ({
+      id: item.id,
+      meal_id: item.mealId,
+      name: item.name,
+      unit_price: item.unitPrice,
+      quantity: item.quantity,
+    }));
+
+    await sql`
+      WITH created_order AS (
+        INSERT INTO customer_orders (
+          id, order_number, kitchen_id, customer_name, customer_phone,
+          delivery_address, notes, subtotal, status
+        ) VALUES (
+          ${orderId}, ${orderNumber}, ${data.kitchenId}, ${data.customerName.trim()},
+          ${customerPhone}, ${data.deliveryAddress.trim()}, ${data.notes?.trim() ?? ""},
+          ${subtotal}, 'pending'
+        )
+        RETURNING id
+      )
+      INSERT INTO customer_order_items (id, order_id, meal_id, name, unit_price, quantity)
+      SELECT item.id, created_order.id, item.meal_id, item.name, item.unit_price, item.quantity
+      FROM created_order
+      CROSS JOIN jsonb_to_recordset(${JSON.stringify(snapshotItems)}::jsonb)
+        AS item(id TEXT, meal_id TEXT, name TEXT, unit_price INTEGER, quantity INTEGER)
+    `;
+
+    res.status(201).json({
+      order: {
+        id: orderId,
+        orderNumber,
+        kitchenId: data.kitchenId,
+        kitchenName: String(kitchen.name),
+        kitchenWhatsapp: String(kitchen.whatsapp ?? "").replace(/[^\\d]/g, ""),
+        customerName: data.customerName.trim(),
+        customerPhone,
+        deliveryAddress: data.deliveryAddress.trim(),
+        notes: data.notes?.trim() ?? "",
+        subtotal,
+        status: "pending",
+        items: orderItems,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/owner/orders", requireAuth, async (req, res, next) => {
+  try {
+    const rows = await sql`
+      SELECT
+        o.id,
+        o.order_number AS "orderNumber",
+        o.kitchen_id AS "kitchenId",
+        k.name AS "kitchenName",
+        o.customer_name AS "customerName",
+        o.customer_phone AS "customerPhone",
+        o.delivery_address AS "deliveryAddress",
+        o.notes,
+        o.subtotal,
+        o.status,
+        o.created_at AS "createdAt",
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', oi.id,
+              'mealId', oi.meal_id,
+              'name', oi.name,
+              'unitPrice', oi.unit_price,
+              'quantity', oi.quantity
+            ) ORDER BY oi.created_at
+          ) FILTER (WHERE oi.id IS NOT NULL),
+          '[]'::json
+        ) AS items
+      FROM customer_orders o
+      JOIN kitchens k ON k.id = o.kitchen_id
+      LEFT JOIN customer_order_items oi ON oi.order_id = o.id
+      WHERE k.owner_id = ${req.user!.id}
+      GROUP BY o.id, k.name
+      ORDER BY o.created_at DESC
+      LIMIT 100
+    `;
+    res.json({ orders: rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch("/api/owner/orders/:id/status", requireAuth, async (req, res, next) => {
+  const parsed = orderStatusSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Choose a valid order status." });
+    return;
+  }
+
+  try {
+    const rows = await sql`
+      UPDATE customer_orders AS o
+      SET status = ${parsed.data.status}, updated_at = NOW()
+      FROM kitchens k
+      WHERE o.kitchen_id = k.id
+        AND o.id = ${req.params.id}
+        AND k.owner_id = ${req.user!.id}
+      RETURNING o.id, o.status
+    `;
+    if (!rows.length) {
+      res.status(404).json({ error: "Order not found or you do not have permission to update it." });
+      return;
+    }
+    res.json({ id: rows[0].id, status: rows[0].status });
   } catch (error) {
     next(error);
   }
