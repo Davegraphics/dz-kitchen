@@ -100,6 +100,14 @@ async function apiRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
   }
   const response = await fetch(url, { ...init, credentials: "include", headers });
   if (response.status === 204) return undefined as T;
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      url.startsWith("/api/")
+        ? "The API did not return JSON. Restart the app with npm run dev so the Vite /api proxy connects to the backend."
+        : "The server returned an unexpected response. Please try again.",
+    );
+  }
   const data = await response.json().catch(() => null) as { error?: string } | null;
   if (!response.ok) throw new Error(data?.error || "The request failed. Please try again.");
   return data as T;
@@ -114,6 +122,7 @@ export default function App() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [authMode, setAuthMode] = useState<"register" | "login">("register");
   const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
   const [authForm, setAuthForm] = useState({ displayName: "", email: "", password: "" });
   const [uploadingKitchen, setUploadingKitchen] = useState(false);
   const [uploadingMeal, setUploadingMeal] = useState(false);
@@ -350,6 +359,7 @@ export default function App() {
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setAuthError("");
     setAuthBusy(true);
     try {
       const endpoint = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
@@ -365,7 +375,9 @@ export default function App() {
       await refreshKitchens();
       notify(authMode === "register" ? "Owner account created." : "Welcome back.");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not sign in.");
+      const message = error instanceof Error ? error.message : "Could not sign in or create your account.";
+      setAuthError(message);
+      notify(message);
     } finally {
       setAuthBusy(false);
     }
@@ -602,7 +614,8 @@ export default function App() {
         </button>
         <nav className="main-nav" aria-label="Main navigation">
           <button className={!isOwner && tab !== "kitchen" ? "nav-link active" : "nav-link"} onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>Discover</button>
-          <button className="nav-link" onClick={() => beginOwner()}>For kitchens</button>
+          <button className="nav-link" onClick={() => { setAuthMode("login"); setAuthError(""); beginOwner(); }}>Sign in</button>
+          <button className="nav-link" onClick={() => { setAuthMode("register"); setAuthError(""); beginOwner(); }}>For kitchens</button>
           <span className="nav-note"><span className="green-dot" /> Good food, close to home</span>
         </nav>
         <button className="cart-button" onClick={() => { setPlacedOrder(null); setCartOpen(true); }}>
@@ -702,7 +715,7 @@ export default function App() {
         <main className="owner-page section-wrap">
           <div className="owner-page-top"><button className="back-link" onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>← Back to marketplace</button><span className="demo-badge"><span /> LIVE DATA</span></div>
           <div className="owner-intro"><div className="eyebrow">YOUR FOOD, YOUR STOREFRONT</div><h1>Make room for<br /><em>more orders.</em></h1><p>Create an owner account to manage a kitchen. Menus and storefront details save to the shared Neon database.</p>{currentUser && <div className="owner-account"><span>Signed in as <strong>{currentUser.displayName}</strong> · {currentUser.email}</span><button type="button" onClick={() => void signOut()}>Sign out ↗</button></div>}</div>
-          {!currentUser && <section className="owner-panel auth-panel"><div className="panel-top"><div><div className="eyebrow">OWNER ACCESS</div><h2>{authMode === "register" ? "Create your owner account" : "Welcome back"}</h2></div><span className="panel-number">↗</span></div><form className="owner-form" onSubmit={submitAuth}>{authMode === "register" && <label>Your name <input required minLength={2} maxLength={80} value={authForm.displayName} onChange={(event) => setAuthForm({ ...authForm, displayName: event.target.value })} placeholder="Your full name" /></label>}<label>Email address <input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" autoComplete="email" /></label><label>Password <input required type="password" minLength={authMode === "register" ? 10 : 1} maxLength={128} value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder={authMode === "register" ? "At least 10 characters" : "Your password"} autoComplete={authMode === "register" ? "new-password" : "current-password"} /></label><div className="form-actions"><button className="button button-dark" disabled={authBusy} type="submit">{authBusy ? "Please wait…" : authMode === "register" ? "Create owner account" : "Sign in"} <span>→</span></button><button className="button button-outline" type="button" onClick={() => setAuthMode(authMode === "register" ? "login" : "register")}>{authMode === "register" ? "Already registered? Sign in" : "Create an account"}</button></div><small className="field-hint">Passwords are hashed on the server. Your session uses an HTTP-only cookie.</small></form></section>}
+          {!currentUser && <section className="owner-panel auth-panel"><div className="panel-top"><div><div className="eyebrow">KITCHEN OWNER ACCESS</div><h2>{authMode === "register" ? "Create your owner account" : "Sign in to DZ Kitchen"}</h2><p className="auth-subtitle">{authMode === "register" ? "Create an account to list your kitchen, manage your menu, and receive customer orders." : "Use the email address and password you registered with."}</p></div><span className="panel-number">↗</span></div>{authError && <div className="auth-error" role="alert">{authError}</div>}<form className="owner-form" onSubmit={submitAuth}>{authMode === "register" && <label>Your name <input required minLength={2} maxLength={80} value={authForm.displayName} onChange={(event) => setAuthForm({ ...authForm, displayName: event.target.value })} placeholder="Your full name" autoComplete="name" /></label>}<label>Email address <input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" autoComplete="email" /></label><label>Password <input required type="password" minLength={authMode === "register" ? 10 : 1} maxLength={128} value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder={authMode === "register" ? "At least 10 characters" : "Your password"} autoComplete={authMode === "register" ? "new-password" : "current-password"} /></label>{authMode === "register" && <small className="field-hint">Use at least 10 characters for your password.</small>}<div className="form-actions"><button className="button button-dark" disabled={authBusy} type="submit">{authBusy ? (authMode === "register" ? "Creating account…" : "Signing in…") : authMode === "register" ? "Create owner account" : "Sign in"} <span>→</span></button><button className="button button-outline" type="button" onClick={() => { setAuthMode(authMode === "register" ? "login" : "register"); setAuthError(""); }}>{authMode === "register" ? "Already registered? Sign in" : "New to DZ Kitchen? Create account"}</button></div><small className="field-hint">Kitchen-owner accounts only. Customer checkout does not currently require an account.</small></form></section>}
           <div className="owner-notice" hidden={!currentUser}><span>ⓘ</span><p><strong>Connected workspace:</strong> storefronts, menus, and customer orders are stored in Neon. Uploaded photos are stored in Cloudinary. Owners can only manage their own kitchens and orders.</p></div>
           <section className="owner-panel orders-panel" hidden={!currentUser}>
             <div className="panel-top"><div><div className="eyebrow">LIVE ORDER INBOX</div><h2>Customer orders</h2></div><button className="button button-outline" type="button" onClick={() => { void refreshOrders().catch((error) => notify(error instanceof Error ? error.message : "Could not refresh orders.")); }}>Refresh orders ↻</button></div>
