@@ -38,18 +38,37 @@ type CartLine = {
   quantity: number;
 };
 
-type Tab = "discover" | "kitchen" | "owner";
+type OrderStatus = "pending" | "confirmed" | "preparing" | "ready" | "completed" | "cancelled";
 
-const photos = {
-  jollof: "https://images.unsplash.com/photo-1604329760661-e71dc83f8f26?auto=format&fit=crop&w=1000&q=85",
-  rice: "https://images.unsplash.com/photo-1512058564366-18510be2db19?auto=format&fit=crop&w=1000&q=85",
-  chicken: "https://images.unsplash.com/photo-1532550907401-a500c9a57435?auto=format&fit=crop&w=1000&q=85",
-  pasta: "https://images.unsplash.com/photo-1473093295043-cdd812d0e601?auto=format&fit=crop&w=1000&q=85",
-  burger: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=1000&q=85",
-  soup: "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=1000&q=85",
-  bowl: "https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&w=1000&q=85",
-  pastry: "https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1000&q=85",
+type OrderItem = {
+  id: string;
+  mealId: string;
+  name: string;
+  unitPrice: number;
+  quantity: number;
 };
+
+type CheckoutOrder = {
+  id: string;
+  orderNumber: string;
+  kitchenId: string;
+  kitchenName: string;
+  kitchenWhatsapp: string;
+  customerName: string;
+  customerPhone: string;
+  deliveryAddress: string;
+  notes: string;
+  subtotal: number;
+  status: OrderStatus;
+  items: OrderItem[];
+};
+
+type KitchenOrder = Omit<CheckoutOrder, "kitchenWhatsapp"> & {
+  kitchenWhatsapp?: string;
+  createdAt: string;
+};
+
+type Tab = "discover" | "kitchen" | "owner";
 
 const initialCart: CartLine[] = [];
 
@@ -106,13 +125,23 @@ export default function App() {
   const [cartOpen, setCartOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [ownerKitchenId, setOwnerKitchenId] = useState<string | null>(null);
-  const [menuPrompt, setMenuPrompt] = useState("");
-  const [menuIdeas, setMenuIdeas] = useState<string[]>([]);
+  const [ownerOrders, setOwnerOrders] = useState<KitchenOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutForm, setCheckoutForm] = useState({
+    customerName: "",
+    customerPhone: "",
+    deliveryAddress: "",
+    notes: "",
+  });
+  const [placedOrder, setPlacedOrder] = useState<CheckoutOrder | null>(null);
   const [ownerForm, setOwnerForm] = useState({
     name: "",
     area: "",
     cuisine: "Nigerian",
     description: "",
+    delivery: "",
     image: "",
     imagePublicId: "",
     whatsapp: "",
@@ -157,15 +186,41 @@ export default function App() {
     window.localStorage.setItem("dz-cart", JSON.stringify(cart));
   }, [cart]);
 
+  useEffect(() => {
+    let active = true;
+    if (!currentUser?.id) {
+      setOwnerOrders([]);
+      setOrdersLoading(false);
+      return;
+    }
+    setOrdersLoading(true);
+    apiRequest<{ orders: KitchenOrder[] }>("/api/owner/orders")
+      .then((data) => {
+        if (active) setOwnerOrders(data.orders);
+      })
+      .catch((error) => {
+        if (active) setNotice(error instanceof Error ? error.message : "Could not load customer orders.");
+      })
+      .finally(() => {
+        if (active) setOrdersLoading(false);
+      });
+    return () => { active = false; };
+  }, [currentUser?.id]);
+
   const selectedKitchen = kitchens.find((k) => k.id === selectedKitchenId) ?? null;
   const ownerKitchen = kitchens.find((k) => k.id === ownerKitchenId) ?? null;
+  const heroKitchen = kitchens.find((kitchen) => Boolean(kitchen.image)) ?? null;
+  const heroMeal = kitchens.flatMap((kitchen) => kitchen.meals).find((meal) => Boolean(meal.image)) ?? null;
+  const heroPhoto = heroKitchen?.image ?? heroMeal?.image ?? "";
+  const heroPhotoAlt = heroKitchen?.name ?? heroMeal?.name ?? "A dish from a local kitchen";
 
   const visibleKitchens = useMemo(() => {
     const term = search.trim().toLowerCase();
     return kitchens.filter((kitchen) => {
       const matchesSearch =
         !term ||
-        [kitchen.name, kitchen.area, kitchen.description, kitchen.cuisine]
+        [kitchen.name, kitchen.area, kitchen.description, kitchen.cuisine,
+          ...kitchen.meals.flatMap((meal) => [meal.name, meal.description, meal.category])]
           .some((value) => value.toLowerCase().includes(term));
       const matchesCuisine =
         activeCuisine === "All" || kitchen.cuisine === activeCuisine;
@@ -190,6 +245,28 @@ export default function App() {
     return data.kitchens;
   }
 
+  async function refreshOrders(): Promise<KitchenOrder[]> {
+    const data = await apiRequest<{ orders: KitchenOrder[] }>("/api/owner/orders");
+    setOwnerOrders(data.orders);
+    return data.orders;
+  }
+
+  async function updateOrderStatus(orderId: string, status: OrderStatus) {
+    setUpdatingOrderId(orderId);
+    try {
+      await apiRequest("/api/owner/orders/" + encodeURIComponent(orderId) + "/status", {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      await refreshOrders();
+      notify("Order status updated.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not update the order.");
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  }
+
   function notify(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3000);
@@ -202,6 +279,7 @@ export default function App() {
   }
 
   function addToCart(kitchenId: string, mealId: string) {
+    setPlacedOrder(null);
     if (cart.length > 0 && cartKitchenId !== kitchenId) {
       const confirmed = window.confirm(
         "Your basket contains food from another kitchen. Clear it and start a new basket?",
@@ -251,12 +329,14 @@ export default function App() {
       description: found.description,
       image: found.image,
       imagePublicId: found.imagePublicId ?? "",
+      delivery: found.delivery,
       whatsapp: found.whatsapp,
     } : {
       name: "",
       area: "",
       cuisine: "Nigerian",
       description: "",
+      delivery: "",
       image: "",
       imagePublicId: "",
       whatsapp: "",
@@ -346,7 +426,8 @@ export default function App() {
       area: ownerForm.area.trim(),
       cuisine: ownerForm.cuisine,
       description: ownerForm.description.trim(),
-      image: ownerForm.image.trim() || photos.jollof,
+      delivery: ownerForm.delivery.trim() || "Confirm with kitchen",
+      image: ownerForm.image.trim(),
       imagePublicId: ownerForm.imagePublicId,
       whatsapp: cleanPhone(ownerForm.whatsapp),
     };
@@ -382,7 +463,7 @@ export default function App() {
       description: mealForm.description.trim(),
       price: Number(mealForm.price),
       category: mealForm.category.trim() || "Mains",
-      image: mealForm.image.trim() || photos.rice,
+      image: mealForm.image.trim(),
       imagePublicId: mealForm.imagePublicId,
       available: editingMealId ? editingMealAvailable : true,
     };
@@ -449,51 +530,67 @@ export default function App() {
     }
   }
 
-  function generateIdeas(event: FormEvent<HTMLFormElement>) {
+  async function placeOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const prompt = menuPrompt.trim().toLowerCase();
-    if (!prompt) {
-      setMenuIdeas([]);
+    if (!cartKitchen || !cartDetails.length) {
+      notify("Add at least one available meal to your basket.");
       return;
     }
-    const ideas = prompt.includes("breakfast") || prompt.includes("bakery")
-      ? ["Honey butter pancakes", "Loaded breakfast wrap", "Cinnamon French toast", "Fresh fruit and yoghurt bowl", "Mini pastry sampler"]
-      : prompt.includes("healthy") || prompt.includes("salad")
-        ? ["Grilled chicken power bowl", "Citrus chickpea salad", "Avocado grain bowl", "Roasted sweet potato plate", "Ginger-lime fish with greens"]
-        : prompt.includes("snack") || prompt.includes("small chops")
-          ? ["Spicy chicken bites", "Mini beef rolls", "Plantain and pepper dip", "Crispy veggie samosas", "Suya sliders"]
-          : ["Smoky jollof meal box", "Peppered chicken and plantain", "Creamy garlic pasta", "Chef's signature rice bowl", "Weekend sharing platter"];
-    setMenuIdeas(ideas);
+    const normalizedPhone = cleanPhone(checkoutForm.customerPhone);
+    if (normalizedPhone.length < 8 || normalizedPhone.length > 16) {
+      notify("Enter a valid phone number including country code.");
+      return;
+    }
+
+    setCheckoutBusy(true);
+    try {
+      const result = await apiRequest<{ order: CheckoutOrder }>("/api/orders", {
+        method: "POST",
+        body: JSON.stringify({
+          kitchenId: cartKitchen.id,
+          customerName: checkoutForm.customerName.trim(),
+          customerPhone: normalizedPhone,
+          deliveryAddress: checkoutForm.deliveryAddress.trim(),
+          notes: checkoutForm.notes.trim(),
+          items: cartDetails.map((line) => ({
+            mealId: line.meal.id,
+            quantity: line.quantity,
+          })),
+        }),
+      });
+      setPlacedOrder(result.order);
+      setCart([]);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not place your order.");
+    } finally {
+      setCheckoutBusy(false);
+    }
   }
 
-  function checkout() {
-    if (!cartKitchen) {
-      notify("Your basket is empty.");
-      return;
-    }
-    const phone = cleanPhone(cartKitchen.whatsapp);
-    if (!phone) {
-      notify("This kitchen has not added a WhatsApp contact yet.");
-      setCartOpen(false);
-      beginOwner(cartKitchen.id);
-      return;
-    }
-    const lines = cartDetails.map((line) =>
-      "- " + line.meal.name + " x" + line.quantity + " — " + money(line.meal.price * line.quantity),
+  function whatsappUrlForOrder(order: CheckoutOrder): string | null {
+    const phone = cleanPhone(order.kitchenWhatsapp);
+    if (!phone) return null;
+    const lines = order.items.map((item) =>
+      "- " + item.name + " x" + item.quantity + " — " + money(item.unitPrice * item.quantity),
     );
     const message = [
-      "Hello " + cartKitchen.name + "! I'd like to place an order:",
+      "Hello " + order.kitchenName + "! I've placed an order on DZ Kitchen.",
+      "Order reference: " + order.orderNumber,
       "",
       ...lines,
       "",
-      "Subtotal: " + money(subtotal),
-      "Name: ",
-      "Delivery address: ",
-      "Please confirm availability, delivery fee, and estimated arrival time. Thank you!",
-    ].join("\n");
-    window.open("https://wa.me/" + phone + "?text=" + encodeURIComponent(message), "_blank", "noopener,noreferrer");
+      "Subtotal: " + money(order.subtotal),
+      "Name: " + order.customerName,
+      "Phone: " + order.customerPhone,
+      "Delivery address: " + order.deliveryAddress,
+      order.notes ? "Notes: " + order.notes : "",
+      "",
+      "Please confirm availability, delivery fee, payment method, and estimated arrival time.",
+    ].filter(Boolean).join("\n");
+    return "https://wa.me/" + phone + "?text=" + encodeURIComponent(message);
   }
 
+  const placedOrderWhatsAppUrl = placedOrder ? whatsappUrlForOrder(placedOrder) : null;
   const isOwner = tab === "owner";
 
   return (
@@ -508,7 +605,7 @@ export default function App() {
           <button className="nav-link" onClick={() => beginOwner()}>For kitchens</button>
           <span className="nav-note"><span className="green-dot" /> Good food, close to home</span>
         </nav>
-        <button className="cart-button" onClick={() => setCartOpen(true)}>
+        <button className="cart-button" onClick={() => { setPlacedOrder(null); setCartOpen(true); }}>
           <span className="cart-icon">▱</span> Basket <span className="cart-count">{cartCount}</span>
         </button>
       </header>
@@ -525,16 +622,16 @@ export default function App() {
                 <button className="button button-dark" onClick={() => document.getElementById("discover")?.scrollIntoView({ behavior: "smooth" })}>Explore kitchens <span>↘</span></button>
                 <button className="text-button" onClick={() => beginOwner()}>Have a kitchen? <span>Start here ↗</span></button>
               </div>
-              <div className="hero-proof"><div className="avatar-stack"><span>🍛</span><span>🍝</span><span>🥗</span><span>🍔</span></div><span><strong>Local kitchens,</strong> your kind of flavour.</span></div>
+              <div className="hero-proof"><span className="live-indicator" /><span><strong>{kitchens.length} {kitchens.length === 1 ? "kitchen" : "kitchens"} listed</strong> · Live from the DZ Kitchen database.</span></div>
             </div>
             <div className="hero-art">
-              <div className="hero-image-main"><img src={photos.jollof} alt="Freshly made rice dish" /></div>
-              <div className="floating-card food-label"><span className="mini-icon">✳</span><span><strong>Made with care</strong><small>From your local kitchens</small></span></div>
-              <div className="floating-card rating-label"><span className="star">★</span><span><strong>4.9 / 5</strong><small>Community favourites</small></span></div>
+              <div className="hero-image-main">{heroPhoto ? <img src={heroPhoto} alt={heroPhotoAlt} /> : <div className="photo-placeholder"><span>✳</span><small>Local kitchen photos appear here</small></div>}</div>
+              <div className="floating-card food-label"><span className="mini-icon">✳</span><span><strong>{heroKitchen?.name ?? heroMeal?.name ?? "Made locally"}</strong><small>{heroKitchen?.area ?? "Real listings from local kitchens"}</small></span></div>
+              <div className="floating-card rating-label"><span className="star">●</span><span><strong>{kitchens.length}</strong><small>{kitchens.length === 1 ? "local kitchen listed" : "local kitchens listed"}</small></span></div>
               <div className="scribble scribble-one">good food<br />good mood <span>↗</span></div>
               <div className="hero-blob" />
             </div>
-            <div className="hero-bottom-label"><span>01 / 03</span><span className="line" /><span>REAL FOOD. REAL PEOPLE.</span></div>
+            <div className="hero-bottom-label"><span>LIVE DATA</span><span className="line" /><span>REAL LISTINGS. NO SAMPLE MENUS.</span></div>
           </section>
 
           <section id="discover" className="discover-section section-wrap">
@@ -550,20 +647,19 @@ export default function App() {
             </div>
             {visibleKitchens.length ? (
               <div className="kitchen-grid">
-                {visibleKitchens.map((kitchen, index) => (
+                {visibleKitchens.map((kitchen) => (
                   <article className="kitchen-card" key={kitchen.id}>
                     <button className="kitchen-cover" onClick={() => openKitchen(kitchen.id)} aria-label={"View " + kitchen.name}>
-                      <img src={kitchen.image} alt="" loading="lazy" />
+                      {kitchen.image ? <img src={kitchen.image} alt="" loading="lazy" /> : <div className="photo-placeholder"><span>✳</span><small>No photo yet</small></div>}
                       <span className="cover-tag">{kitchen.cuisine}</span>
                       <span className="cover-open">↗</span>
                     </button>
                     <div className="kitchen-card-body">
-                      <div className="card-title-row"><button className="card-title" onClick={() => openKitchen(kitchen.id)}>{kitchen.name}</button><span className="rating">★ {kitchen.rating.toFixed(1)}</span></div>
+                      <div className="card-title-row"><button className="card-title" onClick={() => openKitchen(kitchen.id)}>{kitchen.name}</button><span className="rating">{kitchen.meals.some((meal) => meal.available) ? "Menu available" : "Not listed yet"}</span></div>
                       <p className="kitchen-description">{kitchen.description}</p>
                       <div className="kitchen-meta"><span>⌖ {kitchen.area}</span><span>◷ {kitchen.delivery}</span></div>
                       <div className="card-footer"><span className="menu-count">{kitchen.meals.length} menu {kitchen.meals.length === 1 ? "item" : "items"}</span><button className="browse-link" onClick={() => openKitchen(kitchen.id)}>View menu <span>→</span></button></div>
                     </div>
-                    {index === 1 && <span className="card-side-note">COMMUNITY PICK</span>}
                   </article>
                 ))}
               </div>
@@ -582,14 +678,14 @@ export default function App() {
         <main className="detail-page section-wrap">
           <button className="back-link" onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>← All kitchens</button>
           <section className="detail-hero">
-            <div className="detail-photo"><img src={selectedKitchen.image} alt={selectedKitchen.name} /></div>
-            <div className="detail-copy"><span className="pill">{selectedKitchen.cuisine}</span><h1>{selectedKitchen.name}<span>.</span></h1><p>{selectedKitchen.description}</p><div className="detail-facts"><span>★ {selectedKitchen.rating.toFixed(1)} <small>community rating</small></span><span>⌖ {selectedKitchen.area}</span><span>◷ {selectedKitchen.delivery}</span></div>{currentUser?.id === selectedKitchen.ownerId && <button className="text-button" onClick={() => beginOwner(selectedKitchen.id)}>Kitchen owner? <span>Edit storefront ↗</span></button>}</div>
+            <div className="detail-photo">{selectedKitchen.image ? <img src={selectedKitchen.image} alt={selectedKitchen.name} /> : <div className="photo-placeholder"><span>✳</span><small>This kitchen has not uploaded a photo yet</small></div>}</div>
+            <div className="detail-copy"><span className="pill">{selectedKitchen.cuisine}</span><h1>{selectedKitchen.name}<span>.</span></h1><p>{selectedKitchen.description}</p><div className="detail-facts"><span>🍽 {selectedKitchen.meals.length} <small>menu items</small></span><span>⌖ {selectedKitchen.area}</span><span>◷ {selectedKitchen.delivery}</span></div>{currentUser?.id === selectedKitchen.ownerId && <button className="text-button" onClick={() => beginOwner(selectedKitchen.id)}>Kitchen owner? <span>Edit storefront ↗</span></button>}</div>
           </section>
           <div className="section-heading menu-heading"><div><div className="eyebrow">MADE FRESH, JUST FOR YOU</div><h2>On the <em>menu.</em></h2></div><span className="results-count">{selectedKitchen.meals.filter((meal) => meal.available).length} available items</span></div>
           <div className="meal-grid">
             {selectedKitchen.meals.map((meal) => (
               <article className={!meal.available ? "meal-card unavailable" : "meal-card"} key={meal.id}>
-                <div className="meal-image"><img src={meal.image} alt={meal.name} loading="lazy" /><span className="meal-category">{meal.category}</span></div>
+                <div className="meal-image">{meal.image ? <img src={meal.image} alt={meal.name} loading="lazy" /> : <div className="photo-placeholder"><span>✳</span><small>No meal photo yet</small></div>}<span className="meal-category">{meal.category}</span></div>
                 <div className="meal-copy"><div className="meal-title-row"><h3>{meal.name}</h3><strong>{money(meal.price)}</strong></div><p>{meal.description}</p><button className={meal.available ? "add-button" : "add-button disabled"} disabled={!meal.available} onClick={() => addToCart(selectedKitchen.id, meal.id)}>{meal.available ? <><span>+</span> Add to basket</> : "Sold out"}</button></div>
               </article>
             ))}
@@ -604,18 +700,28 @@ export default function App() {
 
       {isOwner && (
         <main className="owner-page section-wrap">
-          <div className="owner-page-top"><button className="back-link" onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>← Back to marketplace</button><span className="demo-badge"><span /> NEON DATABASE</span></div>
+          <div className="owner-page-top"><button className="back-link" onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>← Back to marketplace</button><span className="demo-badge"><span /> LIVE DATA</span></div>
           <div className="owner-intro"><div className="eyebrow">YOUR FOOD, YOUR STOREFRONT</div><h1>Make room for<br /><em>more orders.</em></h1><p>Create an owner account to manage a kitchen. Menus and storefront details save to the shared Neon database.</p>{currentUser && <div className="owner-account"><span>Signed in as <strong>{currentUser.displayName}</strong> · {currentUser.email}</span><button type="button" onClick={() => void signOut()}>Sign out ↗</button></div>}</div>
           {!currentUser && <section className="owner-panel auth-panel"><div className="panel-top"><div><div className="eyebrow">OWNER ACCESS</div><h2>{authMode === "register" ? "Create your owner account" : "Welcome back"}</h2></div><span className="panel-number">↗</span></div><form className="owner-form" onSubmit={submitAuth}>{authMode === "register" && <label>Your name <input required minLength={2} maxLength={80} value={authForm.displayName} onChange={(event) => setAuthForm({ ...authForm, displayName: event.target.value })} placeholder="Your full name" /></label>}<label>Email address <input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" autoComplete="email" /></label><label>Password <input required type="password" minLength={authMode === "register" ? 10 : 1} maxLength={128} value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder={authMode === "register" ? "At least 10 characters" : "Your password"} autoComplete={authMode === "register" ? "new-password" : "current-password"} /></label><div className="form-actions"><button className="button button-dark" disabled={authBusy} type="submit">{authBusy ? "Please wait…" : authMode === "register" ? "Create owner account" : "Sign in"} <span>→</span></button><button className="button button-outline" type="button" onClick={() => setAuthMode(authMode === "register" ? "login" : "register")}>{authMode === "register" ? "Already registered? Sign in" : "Create an account"}</button></div><small className="field-hint">Passwords are hashed on the server. Your session uses an HTTP-only cookie.</small></form></section>}
-          <div className="owner-notice" hidden={!currentUser}><span>ⓘ</span><p><strong>Connected workspace:</strong> changes are stored in Neon. Uploaded photos are stored in your Cloudinary account. Owners can only edit kitchens linked to their own account.</p></div>
+          <div className="owner-notice" hidden={!currentUser}><span>ⓘ</span><p><strong>Connected workspace:</strong> storefronts, menus, and customer orders are stored in Neon. Uploaded photos are stored in Cloudinary. Owners can only manage their own kitchens and orders.</p></div>
+          <section className="owner-panel orders-panel" hidden={!currentUser}>
+            <div className="panel-top"><div><div className="eyebrow">LIVE ORDER INBOX</div><h2>Customer orders</h2></div><button className="button button-outline" type="button" onClick={() => { void refreshOrders().catch((error) => notify(error instanceof Error ? error.message : "Could not refresh orders.")); }}>Refresh orders ↻</button></div>
+            {ordersLoading ? <p className="orders-empty">Loading your latest orders…</p> : ownerOrders.length ? <div className="owner-orders-list">{ownerOrders.map((order) => <article className="owner-order-card" key={order.id}>
+              <div className="owner-order-heading"><div><strong>{order.orderNumber}</strong><small>{order.kitchenName} · {new Date(order.createdAt).toLocaleString()}</small></div><strong className="owner-order-total">{money(order.subtotal)}</strong></div>
+              <div className="owner-order-customer"><strong>{order.customerName}</strong><a href={"tel:" + order.customerPhone}>{order.customerPhone}</a><span>{order.deliveryAddress}</span>{order.notes && <small>Note: {order.notes}</small>}</div>
+              <div className="owner-order-items">{order.items.map((item) => <div key={item.id}><span>{item.quantity} × {item.name}</span><strong>{money(item.unitPrice * item.quantity)}</strong></div>)}</div>
+              <div className="owner-order-footer"><span className={"order-status status-" + order.status}>{order.status}</span><label>Update status <select aria-label={"Update status for " + order.orderNumber} disabled={updatingOrderId === order.id} value={order.status} onChange={(event) => void updateOrderStatus(order.id, event.target.value as OrderStatus)}>{[["pending", "Pending"], ["confirmed", "Confirmed"], ["preparing", "Preparing"], ["ready", "Ready"], ["completed", "Completed"], ["cancelled", "Cancelled"]].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
+            </article>)}</div> : <p className="orders-empty">No customer orders yet. New orders from your storefronts will appear here automatically.</p>}
+          </section>
           <div className="owner-layout" hidden={!currentUser}>
-            <aside className="owner-sidebar"><div className="sidebar-heading">YOUR KITCHENS <span>{kitchens.filter((kitchen) => kitchen.ownerId === currentUser?.id).length}</span></div><button className={!ownerKitchenId ? "sidebar-kitchen new active" : "sidebar-kitchen new"} onClick={() => beginOwner()}>＋ Create a kitchen</button>{kitchens.filter((kitchen) => kitchen.ownerId === currentUser?.id).map((kitchen) => <button key={kitchen.id} className={ownerKitchenId === kitchen.id ? "sidebar-kitchen active" : "sidebar-kitchen"} onClick={() => beginOwner(kitchen.id)}><img src={kitchen.image} alt="" /><span><strong>{kitchen.name}</strong><small>{kitchen.area}</small></span><span className="sidebar-arrow">↗</span></button>)}</aside>
+            <aside className="owner-sidebar"><div className="sidebar-heading">YOUR KITCHENS <span>{kitchens.filter((kitchen) => kitchen.ownerId === currentUser?.id).length}</span></div><button className={!ownerKitchenId ? "sidebar-kitchen new active" : "sidebar-kitchen new"} onClick={() => beginOwner()}>＋ Create a kitchen</button>{kitchens.filter((kitchen) => kitchen.ownerId === currentUser?.id).map((kitchen) => <button key={kitchen.id} className={ownerKitchenId === kitchen.id ? "sidebar-kitchen active" : "sidebar-kitchen"} onClick={() => beginOwner(kitchen.id)}>{kitchen.image ? <img src={kitchen.image} alt="" /> : <span className="sidebar-image-placeholder">✳</span>}<span><strong>{kitchen.name}</strong><small>{kitchen.area}</small></span><span className="sidebar-arrow">↗</span></button>)}</aside>
             <div className="owner-content">
               <section className="owner-panel"><div className="panel-top"><div><div className="eyebrow">01 / STORE DETAILS</div><h2>{ownerKitchenId ? "Your kitchen" : "Start your storefront"}</h2></div><span className="panel-number">01</span></div>
                 <form className="owner-form" onSubmit={saveKitchen}>
                   <label>Kitchen name <input required value={ownerForm.name} onChange={(event) => setOwnerForm({ ...ownerForm, name: event.target.value })} placeholder="e.g. Auntie's Kitchen" /></label>
                   <div className="form-two"><label>Neighbourhood / area <input required value={ownerForm.area} onChange={(event) => setOwnerForm({ ...ownerForm, area: event.target.value })} placeholder="e.g. Lekki Phase 1" /></label><label>Cuisine type <select value={ownerForm.cuisine} onChange={(event) => setOwnerForm({ ...ownerForm, cuisine: event.target.value })}>{["Nigerian", "Homestyle", "Italian", "Fast food", "Healthy", "Bakery", "Asian", "Caribbean", "Other"].map((cuisine) => <option key={cuisine}>{cuisine}</option>)}</select></label></div>
                   <label>Short description <textarea rows={3} value={ownerForm.description} onChange={(event) => setOwnerForm({ ...ownerForm, description: event.target.value })} placeholder="Tell neighbours what makes your food special." /></label>
+                  <label>Delivery estimate / policy <input value={ownerForm.delivery} onChange={(event) => setOwnerForm({ ...ownerForm, delivery: event.target.value })} placeholder="e.g. 30–45 minutes or confirm directly" /></label>
                   <label>Storefront photo <input type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void uploadImage(file, "kitchen"); }} /><small className="field-hint">JPG, PNG, WEBP or AVIF · max 5 MB · {uploadingKitchen ? "Uploading…" : ownerForm.image ? "Photo ready" : "Choose a photo"}</small>{ownerForm.image && <img className="upload-preview" src={ownerForm.image} alt="Kitchen photo preview" />}</label>
                   <label>WhatsApp number <input value={ownerForm.whatsapp} onChange={(event) => setOwnerForm({ ...ownerForm, whatsapp: event.target.value })} placeholder="Country code + number, digits are saved" /><small className="field-hint">Use the number that should receive customer orders, with country code. It will be cleaned to digits.</small></label>
                   <div className="form-actions"><button className="button button-dark" disabled={uploadingKitchen} type="submit">{ownerKitchenId ? "Save kitchen details" : "Create kitchen"} <span>→</span></button>{ownerKitchenId && <button className="button button-outline" type="button" onClick={() => openKitchen(ownerKitchenId)}>Preview storefront ↗</button>}</div>
@@ -631,11 +737,10 @@ export default function App() {
                       <label>Meal photo <input type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void uploadImage(file, "meal"); }} /><small className="field-hint">JPG, PNG, WEBP or AVIF · max 5 MB · {uploadingMeal ? "Uploading…" : mealForm.image ? "Photo ready" : "Choose a photo"}</small>{mealForm.image && <img className="upload-preview" src={mealForm.image} alt="Meal photo preview" />}</label>
                       <div className="form-actions"><button className="button button-dark" disabled={uploadingMeal} type="submit">{editingMealId ? "Update menu item" : "Add to menu"} <span>＋</span></button>{editingMealId && <button className="button button-outline" type="button" onClick={() => { setEditingMealId(null); setMealForm({ name: "", description: "", price: "", category: "Mains", image: "", imagePublicId: "" }); setEditingMealAvailable(true); }}>Cancel edit</button>}</div>
                     </form>
-                    <div className="managed-menu">{ownerKitchen?.meals.map((meal) => <div className="managed-meal" key={meal.id}><img src={meal.image} alt="" /><div className="managed-meal-copy"><strong>{meal.name}</strong><small>{money(meal.price)} · {meal.category}</small></div><button className={meal.available ? "availability available" : "availability"} onClick={() => toggleAvailability(meal.id)}>{meal.available ? "Available" : "Sold out"}</button><button className="small-icon-button" aria-label={"Edit " + meal.name} onClick={() => editMeal(meal)}>✎</button><button className="small-icon-button danger" aria-label={"Delete " + meal.name} onClick={() => deleteMeal(meal.id)}>×</button></div>)}
+                    <div className="managed-menu">{ownerKitchen?.meals.map((meal) => <div className="managed-meal" key={meal.id}>{meal.image ? <img src={meal.image} alt="" /> : <span className="managed-image-placeholder">✳</span>}<div className="managed-meal-copy"><strong>{meal.name}</strong><small>{money(meal.price)} · {meal.category}</small></div><button className={meal.available ? "availability available" : "availability"} onClick={() => toggleAvailability(meal.id)}>{meal.available ? "Available" : "Sold out"}</button><button className="small-icon-button" aria-label={"Edit " + meal.name} onClick={() => editMeal(meal)}>✎</button><button className="small-icon-button danger" aria-label={"Delete " + meal.name} onClick={() => deleteMeal(meal.id)}>×</button></div>)}
                       {!ownerKitchen?.meals.length && <p className="menu-empty">Your menu is empty. Add your first item above.</p>}
                     </div>
                   </section>
-                  <section className="owner-panel ai-panel"><div className="panel-top"><div><div className="eyebrow">03 / A LITTLE INSPIRATION</div><h2>Menu idea starter</h2></div><span className="panel-number">✳</span></div><p>Tell us your cuisine or ingredients to get a few starting points. These are sample suggestions, not AI-generated recommendations.</p><form className="idea-form" onSubmit={generateIdeas}><input value={menuPrompt} onChange={(event) => setMenuPrompt(event.target.value)} placeholder="e.g. healthy Nigerian lunch ideas" /><button className="button button-dark" type="submit">Get ideas <span>↗</span></button></form>{menuIdeas.length > 0 && <div className="ideas-grid">{menuIdeas.map((idea, index) => <div key={idea}><span>0{index + 1}</span>{idea}<button onClick={() => setMealForm({ ...mealForm, name: idea })} aria-label={"Use idea " + idea}>＋</button></div>)}</div>}</section>
                 </>
               )}
             </div>
@@ -647,10 +752,24 @@ export default function App() {
 
       {cartOpen && <div className="drawer-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
         <aside className="cart-drawer" role="dialog" aria-modal="true" aria-label="Your basket">
-          <div className="drawer-header"><div><div className="eyebrow">YOUR ORDER</div><h2>Your basket<span>.</span></h2></div><button className="close-button" aria-label="Close basket" onClick={() => setCartOpen(false)}>×</button></div>
-          {cartKitchen && <div className="basket-kitchen"><img src={cartKitchen.image} alt="" /><span><small>ORDERING FROM</small><strong>{cartKitchen.name}</strong></span></div>}
-          {cartDetails.length ? <div className="basket-lines">{cartDetails.map((line) => <div className="basket-line" key={line.meal.id}><img src={line.meal.image} alt="" /><div className="basket-line-copy"><strong>{line.meal.name}</strong><span>{money(line.meal.price)}</span><div className="quantity-controls"><button onClick={() => changeQuantity(line.kitchen.id, line.meal.id, -1)} aria-label={"Remove one " + line.meal.name}>−</button><span>{line.quantity}</span><button onClick={() => changeQuantity(line.kitchen.id, line.meal.id, 1)} aria-label={"Add one " + line.meal.name}>+</button></div></div><strong className="line-total">{money(line.meal.price * line.quantity)}</strong></div>)}</div> : <div className="basket-empty"><span>♡</span><h3>Your basket is looking a little empty.</h3><p>Find something lovely from a local kitchen to get started.</p><button className="button button-dark" onClick={() => { setCartOpen(false); setTab("discover"); }}>Explore kitchens</button></div>}
-          {cartDetails.length > 0 && <div className="drawer-bottom"><div className="subtotal-row"><span>Subtotal</span><strong>{money(subtotal)}</strong></div><p className="checkout-note">Delivery fees and availability are confirmed directly with the kitchen.</p><button className="button button-dark checkout-button" onClick={checkout}>Continue with WhatsApp <span>↗</span></button><button className="clear-cart" onClick={() => { setCart([]); notify("Basket cleared."); }}>Clear basket</button></div>}
+          <div className="drawer-header"><div><div className="eyebrow">YOUR ORDER</div><h2>{placedOrder ? "Order placed" : "Your basket"}<span>.</span></h2></div><button className="close-button" aria-label="Close basket" onClick={() => { setCartOpen(false); setPlacedOrder(null); }}>×</button></div>
+          {placedOrder ? <div className="order-confirmation">
+            <span className="order-success-mark">✓</span><div className="eyebrow">ORDER SAVED</div><h3>Thank you, {placedOrder.customerName}.</h3><p>Your order has been recorded in DZ Kitchen. Keep this reference for follow-up.</p><div className="confirmation-reference"><small>ORDER REFERENCE</small><strong>{placedOrder.orderNumber}</strong><span>Current status: Pending</span><strong className="confirmation-total">{money(placedOrder.subtotal)}</strong></div>
+            {placedOrderWhatsAppUrl ? <a className="button button-dark checkout-button" href={placedOrderWhatsAppUrl} target="_blank" rel="noreferrer noopener">Notify kitchen on WhatsApp ↗</a> : <p className="checkout-note">This kitchen has not added a WhatsApp number yet. Your order is saved; the kitchen owner can view your contact details in the owner workspace.</p>}
+            <button className="button button-outline continue-shopping" onClick={() => { setCartOpen(false); setPlacedOrder(null); setTab("discover"); setSelectedKitchenId(null); }}>Continue exploring</button>
+          </div> : <>
+            {cartKitchen && <div className="basket-kitchen">{cartKitchen.image ? <img src={cartKitchen.image} alt="" /> : <span className="basket-kitchen-placeholder">✳</span>}<span><small>ORDERING FROM</small><strong>{cartKitchen.name}</strong></span></div>}
+            {cartDetails.length ? <div className="basket-lines">{cartDetails.map((line) => <div className="basket-line" key={line.meal.id}>{line.meal.image ? <img src={line.meal.image} alt="" /> : <span className="basket-line-placeholder">✳</span>}<div className="basket-line-copy"><strong>{line.meal.name}</strong><span>{money(line.meal.price)}</span><div className="quantity-controls"><button onClick={() => changeQuantity(line.kitchen.id, line.meal.id, -1)} aria-label={"Remove one " + line.meal.name}>−</button><span>{line.quantity}</span><button onClick={() => changeQuantity(line.kitchen.id, line.meal.id, 1)} aria-label={"Add one " + line.meal.name}>+</button></div></div><strong className="line-total">{money(line.meal.price * line.quantity)}</strong></div>)}</div> : <div className="basket-empty"><span>♡</span><h3>Your basket is looking a little empty.</h3><p>Find something lovely from a local kitchen to get started.</p><button className="button button-dark" onClick={() => { setCartOpen(false); setTab("discover"); }}>Explore kitchens</button></div>}
+            {cartDetails.length > 0 && <form className="drawer-bottom checkout-form" onSubmit={placeOrder}>
+              <div className="subtotal-row"><span>Subtotal</span><strong>{money(subtotal)}</strong></div><p className="checkout-note">Delivery fees and payment are confirmed directly with the kitchen. Your order will be saved so the kitchen can track it.</p>
+              <label>Full name <input required minLength={2} maxLength={80} autoComplete="name" value={checkoutForm.customerName} onChange={(event) => setCheckoutForm({ ...checkoutForm, customerName: event.target.value })} placeholder="Your name" /></label>
+              <label>Phone number <input required type="tel" minLength={8} maxLength={30} autoComplete="tel" value={checkoutForm.customerPhone} onChange={(event) => setCheckoutForm({ ...checkoutForm, customerPhone: event.target.value })} placeholder="Include your country code" /></label>
+              <label>Delivery address <textarea required minLength={5} maxLength={400} rows={2} autoComplete="street-address" value={checkoutForm.deliveryAddress} onChange={(event) => setCheckoutForm({ ...checkoutForm, deliveryAddress: event.target.value })} placeholder="Street, neighbourhood, city" /></label>
+              <label>Order notes (optional) <textarea maxLength={600} rows={2} value={checkoutForm.notes} onChange={(event) => setCheckoutForm({ ...checkoutForm, notes: event.target.value })} placeholder="Gate instructions, allergies, or other requests" /></label>
+              <button className="button button-dark checkout-button" type="submit" disabled={checkoutBusy}>{checkoutBusy ? "Saving order…" : "Place order"} <span>→</span></button>
+              <button className="clear-cart" type="button" onClick={() => { setCart([]); setPlacedOrder(null); notify("Basket cleared."); }}>Clear basket</button>
+            </form>}
+          </>}
         </aside>
       </div>}
 

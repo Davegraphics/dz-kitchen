@@ -1,6 +1,6 @@
 # DZ Kitchen
 
-DZ Kitchen is a multi-kitchen food ordering website. Customers can discover kitchens and browse menus; kitchen owners create an account, manage their storefront, and upload kitchen/menu photos.
+DZ Kitchen is a multi-kitchen food ordering website. Customers discover live kitchen listings, search menus, build a basket, and place orders that are saved in Neon before optionally notifying the kitchen through WhatsApp. Kitchen owners create an account, manage storefronts and menus, upload real photos, and track/update incoming orders.
 
 **Existing AppDeploy version:** https://dz-kitchen-zw3qpx.v2.appdeploy.ai/
 
@@ -26,7 +26,7 @@ This repository is the portable React app source. Its local build now uses a Nod
 2. In the Neon dashboard, copy your database connection string. Prefer the pooled connection string and ensure SSL is required.
 3. Keep the connection string private.
 
-The API creates the `users`, `kitchens`, and `meals` tables and indexes on server startup. Storefronts and menus are now stored in Neon rather than browser local storage.
+The API creates the `users`, `kitchens`, `meals`, `customer_orders`, and `customer_order_items` tables and indexes on server startup. Storefronts, menus, order records, and order-item price snapshots are stored in Neon rather than browser local storage. There is no demo kitchen/menu seed data.
 
 ## 3. Configure Cloudinary
 
@@ -82,6 +82,9 @@ When opening **For kitchens**, create an owner account or sign in. Then create a
 - `GET /api/auth/me` — current session
 - `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`
 - `GET /api/kitchens` — public kitchens and their menus
+- `POST /api/orders` — validates availability and prices server-side, then saves a customer order
+- `GET /api/owner/orders` — lists orders for kitchens owned by the signed-in user
+- `PATCH /api/owner/orders/:id/status` — changes the status of an order belonging to the signed-in owner's kitchen
 - `POST /api/kitchens`, `PATCH /api/kitchens/:id` — owner-managed kitchen records
 - `POST /api/kitchens/:id/meals`, `PATCH /api/meals/:id`, `DELETE /api/meals/:id`
 - `POST /api/uploads/images` — authenticated Cloudinary image upload
@@ -92,8 +95,8 @@ When opening **For kitchens**, create an owner account or sign in. Then create a
 - Owner writes and uploads require a signed-in session. The database enforces kitchen ownership in write queries.
 - Passwords are stored as bcrypt hashes. The session is an HTTP-only cookie; JWT signing secrets and Cloudinary secrets stay server-side.
 - Image uploads allow JPG/JPEG, PNG, WEBP, and AVIF up to 5 MB. Upload requests are rate-limited.
-- For production, add verified email/password reset, review CSRF/origin protections and deployment headers, configure HTTPS and a production cookie domain, add order persistence/payment flows, backups, monitoring, and automated integration tests.
-- The AI menu idea helper is still a local suggestion helper; it is not connected to an AI API.
+- Orders are stored with a server-verified item/price snapshot and start in `pending` status. The buyer can then open WhatsApp to notify the kitchen; delivery fees, payment collection, and delivery fulfillment remain coordinated directly with the kitchen. Online payment is not integrated.
+- Before production, add verified email/password reset, review CSRF/origin protections and deployment headers, configure HTTPS and a production cookie domain, add backups, monitoring, and automated integration tests.
 - The AppDeploy-hosted site is separate from this repository and is not modified by local development.
 
 ## Project structure
