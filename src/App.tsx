@@ -68,7 +68,16 @@ type KitchenOrder = Omit<CheckoutOrder, "kitchenWhatsapp"> & {
   createdAt: string;
 };
 
-type Tab = "discover" | "kitchen" | "owner";
+type TrackedOrder = {
+  orderNumber: string;
+  kitchenName: string;
+  status: OrderStatus;
+  subtotal: number;
+  createdAt: string;
+  items: Array<{ name: string; quantity: number }>;
+};
+
+type Tab = "discover" | "kitchen" | "track" | "owner";
 
 const initialCart: CartLine[] = [];
 
@@ -147,6 +156,10 @@ export default function App() {
     notes: "",
   });
   const [placedOrder, setPlacedOrder] = useState<CheckoutOrder | null>(null);
+  const [trackingForm, setTrackingForm] = useState({ orderNumber: "", customerPhone: "" });
+  const [trackingBusy, setTrackingBusy] = useState(false);
+  const [trackingError, setTrackingError] = useState("");
+  const [trackedOrder, setTrackedOrder] = useState<TrackedOrder | null>(null);
   const [ownerForm, setOwnerForm] = useState({
     name: "",
     area: "",
@@ -560,6 +573,27 @@ export default function App() {
     }
   }
 
+  async function lookupOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTrackingError("");
+    setTrackedOrder(null);
+    setTrackingBusy(true);
+    try {
+      const result = await apiRequest<{ order: TrackedOrder }>("/api/orders/lookup", {
+        method: "POST",
+        body: JSON.stringify({
+          orderNumber: trackingForm.orderNumber.trim().toUpperCase(),
+          customerPhone: trackingForm.customerPhone,
+        }),
+      });
+      setTrackedOrder(result.order);
+    } catch (error) {
+      setTrackingError(error instanceof Error ? error.message : "Could not find that order.");
+    } finally {
+      setTrackingBusy(false);
+    }
+  }
+
   async function placeOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cartKitchen || !cartDetails.length) {
@@ -631,7 +665,8 @@ export default function App() {
           <span className="brand-name">dz kitchen<span>.</span></span>
         </button>
         <nav className="main-nav" aria-label="Main navigation">
-          <button className={!isOwner && tab !== "kitchen" ? "nav-link active" : "nav-link"} onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>Discover</button>
+          <button className={tab === "discover" ? "nav-link active" : "nav-link"} onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>Discover</button>
+          <button className={tab === "track" ? "nav-link active" : "nav-link"} onClick={() => { setTab("track"); setSelectedKitchenId(null); setCartOpen(false); setTrackingError(""); setTrackedOrder(null); }}>Track order</button>
           <button className="nav-link" onClick={() => { setAuthMode("login"); setAuthError(""); beginOwner(); }}>Sign in</button>
           <button className="nav-link" onClick={() => { setAuthMode("register"); setAuthError(""); beginOwner(); }}>For kitchens</button>
           <span className="nav-note"><span className="green-dot" /> Good food, close to home</span>
@@ -718,6 +753,62 @@ export default function App() {
         </main>
       )}
 
+      {tab === "track" && (
+        <main className="owner-page track-page section-wrap">
+          <div className="owner-page-top">
+            <button className="back-link" onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>← Back to marketplace</button>
+            <span className="demo-badge"><span /> ORDER TRACKING</span>
+          </div>
+          <div className="owner-intro">
+            <div className="eyebrow">YOUR ORDER, AT A GLANCE</div>
+            <h1>Know where your<br /><em>order stands.</em></h1>
+            <p>Enter your order reference and the phone number you provided at checkout to see the latest status shared by the kitchen.</p>
+          </div>
+          <section className="owner-panel track-panel">
+            <div className="panel-top">
+              <div><div className="eyebrow">ORDER LOOKUP</div><h2>Find your order</h2></div>
+              <span className="panel-number">↗</span>
+            </div>
+            <form className="owner-form" onSubmit={lookupOrder}>
+              <label>Order reference
+                <input required maxLength={16} value={trackingForm.orderNumber} onChange={(event) => setTrackingForm({ ...trackingForm, orderNumber: event.target.value.toUpperCase() })} placeholder="DZ-261012-A1B2C3" autoCapitalize="characters" />
+              </label>
+              <label>Phone number used at checkout
+                <input required type="tel" minLength={8} maxLength={30} autoComplete="tel" value={trackingForm.customerPhone} onChange={(event) => setTrackingForm({ ...trackingForm, customerPhone: event.target.value })} placeholder="Enter your checkout phone number" />
+              </label>
+              {trackingError && <div className="auth-error" role="alert">{trackingError}</div>}
+              <div className="form-actions">
+                <button className="button button-dark" disabled={trackingBusy} type="submit">{trackingBusy ? "Looking up order…" : "Check order status"} <span>→</span></button>
+              </div>
+            </form>
+            {trackedOrder && (
+              <article className="owner-order-card track-result" aria-live="polite">
+                <div className="owner-order-heading">
+                  <div><strong>{trackedOrder.orderNumber}</strong><small>{trackedOrder.kitchenName} · Placed {new Date(trackedOrder.createdAt).toLocaleString()}</small></div>
+                  <strong className="owner-order-total">{money(trackedOrder.subtotal)}</strong>
+                </div>
+                <div className="track-status-line"><span className={"order-status status-" + trackedOrder.status}>{trackedOrder.status}</span><span>Latest kitchen update</span></div>
+                <div className="owner-order-items">
+                  {trackedOrder.items.map((item) => <div key={item.name}><span>{item.quantity} × {item.name}</span></div>)}
+                </div>
+                <p className="track-result-note">{trackedOrder.status === "pending"
+                  ? "Your order has been received and is waiting for the kitchen to confirm it."
+                  : trackedOrder.status === "confirmed"
+                    ? "The kitchen has confirmed your order."
+                    : trackedOrder.status === "preparing"
+                      ? "Your meal is being prepared."
+                      : trackedOrder.status === "ready"
+                        ? "Your order is marked ready. Contact the kitchen directly for pickup or delivery details."
+                        : trackedOrder.status === "completed"
+                          ? "The kitchen has marked this order as completed."
+                          : "The kitchen has marked this order as cancelled. Contact the kitchen directly if you need clarification."}</p>
+              </article>
+            )}
+          </section>
+          <p className="track-help">For privacy, the tracking page only shows basic order details. Your reference and phone number must match the details from checkout.</p>
+        </main>
+      )}
+
       {tab === "kitchen" && selectedKitchen && (
         <main className="detail-page section-wrap">
           <button className="back-link" onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>← All kitchens</button>
@@ -800,6 +891,14 @@ export default function App() {
           {placedOrder ? <div className="order-confirmation">
             <span className="order-success-mark">✓</span><div className="eyebrow">ORDER SAVED</div><h3>Thank you, {placedOrder.customerName}.</h3><p>Your order has been recorded in DZ Kitchen. Keep this reference for follow-up.</p><div className="confirmation-reference"><small>ORDER REFERENCE</small><strong>{placedOrder.orderNumber}</strong><span>Current status: Pending</span><strong className="confirmation-total">{money(placedOrder.subtotal)}</strong></div>
             {placedOrderWhatsAppUrl ? <a className="button button-dark checkout-button" href={placedOrderWhatsAppUrl} target="_blank" rel="noreferrer noopener">Notify kitchen on WhatsApp ↗</a> : <p className="checkout-note">This kitchen has not added a WhatsApp number yet. Your order is saved; the kitchen owner can view your contact details in the owner workspace.</p>}
+            <button className="button button-outline continue-shopping" onClick={() => {
+              setTrackingForm({ orderNumber: placedOrder.orderNumber, customerPhone: placedOrder.customerPhone });
+              setTrackingError("");
+              setTrackedOrder(null);
+              setCartOpen(false);
+              setPlacedOrder(null);
+              setTab("track");
+            }}>Track this order</button>
             <button className="button button-outline continue-shopping" onClick={() => { setCartOpen(false); setPlacedOrder(null); setTab("discover"); setSelectedKitchenId(null); }}>Continue exploring</button>
           </div> : <>
             {cartKitchen && <div className="basket-kitchen">{cartKitchen.image ? <img src={cartKitchen.image} alt="" /> : <span className="basket-kitchen-placeholder">✳</span>}<span><small>ORDERING FROM</small><strong>{cartKitchen.name}</strong></span></div>}

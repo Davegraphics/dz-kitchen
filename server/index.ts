@@ -91,6 +91,14 @@ const orderLimiter = rateLimit({
   message: { error: "Too many order attempts. Please try again later." },
 });
 
+const orderLookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many tracking attempts. Please try again in 15 minutes." },
+});
+
 const sessionCookie = {
   httpOnly: true,
   secure: isProduction,
@@ -197,6 +205,12 @@ const orderSchema = z.object({
 
 const orderStatusSchema = z.object({
   status: z.enum(["pending", "confirmed", "preparing", "ready", "completed", "cancelled"]),
+});
+
+const orderLookupSchema = z.object({
+  orderNumber: z.string().trim().regex(/^DZ-\d{6}-[A-F0-9]{6}$/i, "Enter a valid DZ Kitchen order reference.")
+    .transform((value) => value.toUpperCase()),
+  customerPhone: z.string().trim().min(7).max(30),
 });
 
 async function userOwnsKitchen(userId: string, kitchenId: string): Promise<boolean> {
@@ -435,6 +449,64 @@ app.post("/api/orders", orderLimiter, async (req, res, next) => {
         subtotal,
         status: "pending",
         items: orderItems,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/orders/lookup", orderLookupLimiter, async (req, res, next) => {
+  const parsed = orderLookupSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Enter your order reference and checkout phone number." });
+    return;
+  }
+
+  const customerPhone = parsed.data.customerPhone.replace(/[^\d]/g, "");
+  if (customerPhone.length < 8 || customerPhone.length > 16) {
+    res.status(400).json({ error: "Enter the same valid phone number you used at checkout." });
+    return;
+  }
+
+  try {
+    const rows = await sql`
+      SELECT
+        o.order_number AS "orderNumber",
+        k.name AS "kitchenName",
+        o.status,
+        o.subtotal,
+        o.created_at AS "createdAt",
+        COALESCE(
+          json_agg(
+            json_build_object('name', oi.name, 'quantity', oi.quantity)
+            ORDER BY oi.created_at
+          ) FILTER (WHERE oi.id IS NOT NULL),
+          '[]'::json
+        ) AS items
+      FROM customer_orders o
+      JOIN kitchens k ON k.id = o.kitchen_id
+      LEFT JOIN customer_order_items oi ON oi.order_id = o.id
+      WHERE o.order_number = ${parsed.data.orderNumber}
+        AND o.customer_phone = ${customerPhone}
+      GROUP BY o.id, k.name
+      LIMIT 1
+    `;
+
+    if (!rows.length) {
+      res.status(404).json({ error: "We couldn't find that order. Check the reference and checkout phone number, then try again." });
+      return;
+    }
+
+    const row = rows[0];
+    res.json({
+      order: {
+        orderNumber: String(row.orderNumber),
+        kitchenName: String(row.kitchenName),
+        status: String(row.status),
+        subtotal: Number(row.subtotal),
+        createdAt: String(row.createdAt),
+        items: row.items,
       },
     });
   } catch (error) {

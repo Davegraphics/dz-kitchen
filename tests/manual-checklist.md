@@ -12,6 +12,8 @@
 - [ ] Adding from another kitchen prompts before replacing the basket.
 - [ ] Checkout validates required customer details and saves an order in Neon.
 - [ ] The order confirmation shows an order reference and total.
+- [ ] Order tracking accepts a matching order reference and checkout phone number and shows the latest status.
+- [ ] Order tracking rejects a wrong reference/phone pair without exposing delivery address or customer contact details.
 - [ ] If a kitchen has a WhatsApp number, the saved order can be shared with the kitchen.
 - [ ] If no WhatsApp number is configured, the order still saves and the confirmation explains the fallback.
 - [ ] Owner registration and sign-in work; signing out clears the active owner session.
