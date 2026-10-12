@@ -7,16 +7,25 @@ type Meal = {
   price: number;
   category: string;
   image: string;
+  imagePublicId?: string;
   available: boolean;
+};
+
+type User = {
+  id: string;
+  email: string;
+  displayName: string;
 };
 
 type Kitchen = {
   id: string;
+  ownerId: string;
   name: string;
   area: string;
   description: string;
   cuisine: string;
   image: string;
+  imagePublicId?: string;
   rating: number;
   delivery: string;
   whatsapp: string;
@@ -42,100 +51,6 @@ const photos = {
   pastry: "https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=1000&q=85",
 };
 
-const seedKitchens: Kitchen[] = [
-  {
-    id: "copper-pot",
-    name: "The Copper Pot",
-    area: "Lekki Phase 1",
-    description: "Comforting Nigerian classics, made fresh every day.",
-    cuisine: "Nigerian",
-    image: photos.jollof,
-    rating: 4.9,
-    delivery: "25–40 min",
-    whatsapp: "",
-    meals: [
-      { id: "cp-1", name: "Smoky Party Jollof", description: "Long-grain rice, rich pepper base, and that party jollof flavour.", price: 4500, category: "Rice", image: photos.jollof, available: true },
-      { id: "cp-2", name: "Jollof & Grilled Chicken", description: "Smoky jollof with juicy grilled chicken and plantain.", price: 6500, category: "Combos", image: photos.chicken, available: true },
-      { id: "cp-3", name: "Fried Rice Special", description: "Colourful fried rice with mixed vegetables and chicken.", price: 5500, category: "Rice", image: photos.rice, available: true },
-    ],
-  },
-  {
-    id: "little-lagos",
-    name: "Little Lagos Kitchen",
-    area: "Yaba",
-    description: "Home-style plates with big, familiar flavours.",
-    cuisine: "Homestyle",
-    image: photos.chicken,
-    rating: 4.8,
-    delivery: "20–35 min",
-    whatsapp: "",
-    meals: [
-      { id: "ll-1", name: "Ofada Rice & Ayamase", description: "Local rice and signature green pepper sauce.", price: 6000, category: "Local favourites", image: photos.rice, available: true },
-      { id: "ll-2", name: "Sunday Stew Chicken", description: "Slow-cooked tomato stew with tender chicken and rice.", price: 5000, category: "Combos", image: photos.chicken, available: true },
-    ],
-  },
-  {
-    id: "pasta-social",
-    name: "Pasta Social",
-    area: "Victoria Island",
-    description: "A little Italian-inspired joy, prepared to order.",
-    cuisine: "Italian",
-    image: photos.pasta,
-    rating: 4.7,
-    delivery: "30–45 min",
-    whatsapp: "",
-    meals: [
-      { id: "ps-1", name: "Creamy Chicken Penne", description: "Penne, creamy herb sauce, chicken, and parmesan.", price: 7800, category: "Pasta", image: photos.pasta, available: true },
-      { id: "ps-2", name: "Spicy Tomato Spaghetti", description: "Garlicky tomato sauce with a gentle chilli kick.", price: 6200, category: "Pasta", image: photos.pasta, available: true },
-    ],
-  },
-  {
-    id: "bun-and-bite",
-    name: "Bun & Bite",
-    area: "Surulere",
-    description: "Stacked burgers, golden sides, and weekend treats.",
-    cuisine: "Fast food",
-    image: photos.burger,
-    rating: 4.8,
-    delivery: "25–40 min",
-    whatsapp: "",
-    meals: [
-      { id: "bb-1", name: "The Classic Smash", description: "Smash-style beef patty, cheese, pickles, and house sauce.", price: 7200, category: "Burgers", image: photos.burger, available: true },
-      { id: "bb-2", name: "Crispy Chicken Burger", description: "Crunchy chicken, slaw, and tangy mayo in a soft bun.", price: 6800, category: "Burgers", image: photos.chicken, available: true },
-    ],
-  },
-  {
-    id: "green-bowl",
-    name: "Green Bowl Club",
-    area: "Ikeja GRA",
-    description: "Fresh, colourful bowls that keep you going.",
-    cuisine: "Healthy",
-    image: photos.bowl,
-    rating: 4.6,
-    delivery: "20–30 min",
-    whatsapp: "",
-    meals: [
-      { id: "gb-1", name: "Power Grain Bowl", description: "Grains, leafy greens, avocado, and a citrus dressing.", price: 7500, category: "Bowls", image: photos.bowl, available: true },
-      { id: "gb-2", name: "Roast Chicken Salad", description: "Herby chicken, crisp vegetables, and lemon vinaigrette.", price: 8000, category: "Salads", image: photos.chicken, available: true },
-    ],
-  },
-  {
-    id: "morning-crumb",
-    name: "Morning Crumb",
-    area: "Maryland",
-    description: "Fresh bakes and small-batch morning favourites.",
-    cuisine: "Bakery",
-    image: photos.pastry,
-    rating: 4.9,
-    delivery: "30–50 min",
-    whatsapp: "",
-    meals: [
-      { id: "mc-1", name: "Butter Croissant Box", description: "Four flaky, buttery croissants baked fresh.", price: 5000, category: "Bakery", image: photos.pastry, available: true },
-      { id: "mc-2", name: "Cinnamon Morning Roll", description: "Soft swirl with cinnamon sugar and vanilla glaze.", price: 2800, category: "Bakery", image: photos.pastry, available: true },
-    ],
-  },
-];
-
 const initialCart: CartLine[] = [];
 
 function readSaved<T,>(key: string, fallback: T): T {
@@ -155,21 +70,35 @@ function money(value: number): string {
   }).format(value);
 }
 
-function makeId(): string {
-  return Math.random().toString(36).slice(2, 10);
-}
-
 function cleanPhone(value: string): string {
   return value.replace(/[^\d]/g, "");
 }
 
+async function apiRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(url, { ...init, credentials: "include", headers });
+  if (response.status === 204) return undefined as T;
+  const data = await response.json().catch(() => null) as { error?: string } | null;
+  if (!response.ok) throw new Error(data?.error || "The request failed. Please try again.");
+  return data as T;
+}
+
 export default function App() {
-  const [kitchens, setKitchens] = useState<Kitchen[]>(() =>
-    readSaved("dz-kitchens", seedKitchens),
-  );
+  const [kitchens, setKitchens] = useState<Kitchen[]>([]);
   const [cart, setCart] = useState<CartLine[]>(() =>
     readSaved("dz-cart", initialCart),
   );
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [authMode, setAuthMode] = useState<"register" | "login">("register");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authForm, setAuthForm] = useState({ displayName: "", email: "", password: "" });
+  const [uploadingKitchen, setUploadingKitchen] = useState(false);
+  const [uploadingMeal, setUploadingMeal] = useState(false);
+  const [editingMealAvailable, setEditingMealAvailable] = useState(true);
   const [tab, setTab] = useState<Tab>("discover");
   const [selectedKitchenId, setSelectedKitchenId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -185,6 +114,7 @@ export default function App() {
     cuisine: "Nigerian",
     description: "",
     image: "",
+    imagePublicId: "",
     whatsapp: "",
   });
   const [mealForm, setMealForm] = useState({
@@ -193,12 +123,35 @@ export default function App() {
     price: "",
     category: "Mains",
     image: "",
+    imagePublicId: "",
   });
   const [editingMealId, setEditingMealId] = useState<string | null>(null);
 
   useEffect(() => {
-    window.localStorage.setItem("dz-kitchens", JSON.stringify(kitchens));
-  }, [kitchens]);
+    let active = true;
+    const load = async () => {
+      try {
+        const [kitchenData, authData] = await Promise.all([
+          apiRequest<{ kitchens: Kitchen[] }>("/api/kitchens"),
+          apiRequest<{ user: User | null }>("/api/auth/me"),
+        ]);
+        if (!active) return;
+        setKitchens(kitchenData.kitchens);
+        setCurrentUser(authData.user);
+        setCart((current) => current.filter((line) =>
+          kitchenData.kitchens.some((kitchen) =>
+            kitchen.id === line.kitchenId && kitchen.meals.some((meal) => meal.id === line.mealId),
+          ),
+        ));
+      } catch (error) {
+        if (active) setNotice(error instanceof Error ? error.message : "Could not connect to DZ Kitchen API.");
+      } finally {
+        if (active) setInitialLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem("dz-cart", JSON.stringify(cart));
@@ -230,6 +183,12 @@ export default function App() {
   });
   const subtotal = cartDetails.reduce((sum, line) => sum + line.meal.price * line.quantity, 0);
   const cuisines = ["All", ...Array.from(new Set(kitchens.map((k) => k.cuisine)))];
+
+  async function refreshKitchens(): Promise<Kitchen[]> {
+    const data = await apiRequest<{ kitchens: Kitchen[] }>("/api/kitchens");
+    setKitchens(data.kitchens);
+    return data.kitchens;
+  }
 
   function notify(message: string) {
     setNotice(message);
@@ -280,6 +239,10 @@ export default function App() {
 
   function beginOwner(kitchenId?: string) {
     const found = kitchenId ? kitchens.find((k) => k.id === kitchenId) : undefined;
+    if (found && currentUser?.id !== found.ownerId) {
+      notify("Sign in with the account that owns this kitchen to manage it.");
+      return;
+    }
     setOwnerKitchenId(found?.id ?? null);
     setOwnerForm(found ? {
       name: found.name,
@@ -287,6 +250,7 @@ export default function App() {
       cuisine: found.cuisine,
       description: found.description,
       image: found.image,
+      imagePublicId: found.imagePublicId ?? "",
       whatsapp: found.whatsapp,
     } : {
       name: "",
@@ -294,110 +258,195 @@ export default function App() {
       cuisine: "Nigerian",
       description: "",
       image: "",
+      imagePublicId: "",
       whatsapp: "",
     });
-    setMealForm({ name: "", description: "", price: "", category: "Mains", image: "" });
+    setMealForm({ name: "", description: "", price: "", category: "Mains", image: "", imagePublicId: "" });
     setEditingMealId(null);
     setTab("owner");
     setCartOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function saveKitchen(event: FormEvent<HTMLFormElement>) {
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setAuthBusy(true);
+    try {
+      const endpoint = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
+      const body = authMode === "register"
+        ? authForm
+        : { email: authForm.email, password: authForm.password };
+      const result = await apiRequest<{ user: User }>(endpoint, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setCurrentUser(result.user);
+      setAuthForm({ displayName: "", email: result.user.email, password: "" });
+      await refreshKitchens();
+      notify(authMode === "register" ? "Owner account created." : "Welcome back.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not sign in.");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function signOut() {
+    try {
+      await apiRequest<void>("/api/auth/logout", { method: "POST" });
+      setCurrentUser(null);
+      setOwnerKitchenId(null);
+      setAuthForm({ displayName: "", email: "", password: "" });
+      notify("You have signed out.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not sign out.");
+    }
+  }
+
+  async function uploadImage(file: File, target: "kitchen" | "meal") {
+    if (!currentUser) {
+      notify("Sign in before uploading images.");
+      return;
+    }
+    if (target === "kitchen") setUploadingKitchen(true);
+    else setUploadingMeal(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const result = await apiRequest<{ url: string; publicId: string }>("/api/uploads/images", {
+        method: "POST",
+        body: formData,
+      });
+      if (target === "kitchen") {
+        setOwnerForm((current) => ({ ...current, image: result.url, imagePublicId: result.publicId }));
+      } else {
+        setMealForm((current) => ({ ...current, image: result.url, imagePublicId: result.publicId }));
+      }
+      notify("Image uploaded to Cloudinary.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Image upload failed.");
+    } finally {
+      if (target === "kitchen") setUploadingKitchen(false);
+      else setUploadingMeal(false);
+    }
+  }
+
+  async function saveKitchen(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!currentUser) {
+      notify("Create an owner account or sign in first.");
+      return;
+    }
     if (!ownerForm.name.trim() || !ownerForm.area.trim()) {
       notify("Add a kitchen name and location first.");
       return;
     }
-    if (ownerKitchenId) {
-      setKitchens((current) => current.map((k) =>
-        k.id === ownerKitchenId ? {
-          ...k,
-          name: ownerForm.name.trim(),
-          area: ownerForm.area.trim(),
-          cuisine: ownerForm.cuisine,
-          description: ownerForm.description.trim(),
-          image: ownerForm.image.trim() || k.image,
-          whatsapp: cleanPhone(ownerForm.whatsapp),
-        } : k,
-      ));
-      notify("Kitchen details saved.");
-    } else {
-      const created: Kitchen = {
-        id: makeId(),
-        name: ownerForm.name.trim(),
-        area: ownerForm.area.trim(),
-        cuisine: ownerForm.cuisine,
-        description: ownerForm.description.trim(),
-        image: ownerForm.image.trim() || photos.jollof,
-        whatsapp: cleanPhone(ownerForm.whatsapp),
-        rating: 5,
-        delivery: "Confirm with kitchen",
-        meals: [],
-      };
-      setKitchens((current) => [created, ...current]);
-      setOwnerKitchenId(created.id);
-      notify("Kitchen created. Add your first menu item below.");
+    const body = {
+      name: ownerForm.name.trim(),
+      area: ownerForm.area.trim(),
+      cuisine: ownerForm.cuisine,
+      description: ownerForm.description.trim(),
+      image: ownerForm.image.trim() || photos.jollof,
+      imagePublicId: ownerForm.imagePublicId,
+      whatsapp: cleanPhone(ownerForm.whatsapp),
+    };
+    try {
+      if (ownerKitchenId) {
+        await apiRequest("/api/kitchens/" + encodeURIComponent(ownerKitchenId), {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        });
+        notify("Kitchen details saved to Neon.");
+      } else {
+        const created = await apiRequest<{ id: string }>("/api/kitchens", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        setOwnerKitchenId(created.id);
+        notify("Kitchen created in Neon. Add your first menu item below.");
+      }
+      await refreshKitchens();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not save kitchen.");
     }
   }
 
-  function saveMeal(event: FormEvent<HTMLFormElement>) {
+  async function saveMeal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!ownerKitchenId || !mealForm.name.trim() || Number(mealForm.price) <= 0) {
+    if (!currentUser || !ownerKitchenId || !mealForm.name.trim() || Number(mealForm.price) <= 0) {
       notify("Enter a meal name and a price greater than zero.");
       return;
     }
-    const meal: Meal = {
-      id: editingMealId ?? makeId(),
+    const body = {
       name: mealForm.name.trim(),
       description: mealForm.description.trim(),
       price: Number(mealForm.price),
       category: mealForm.category.trim() || "Mains",
       image: mealForm.image.trim() || photos.rice,
-      available: true,
+      imagePublicId: mealForm.imagePublicId,
+      available: editingMealId ? editingMealAvailable : true,
     };
-    setKitchens((current) => current.map((kitchen) => {
-      if (kitchen.id !== ownerKitchenId) return kitchen;
-      return {
-        ...kitchen,
-        meals: editingMealId
-          ? kitchen.meals.map((item) => item.id === editingMealId ? { ...meal, available: item.available } : item)
-          : [...kitchen.meals, meal],
-      };
-    }));
-    setMealForm({ name: "", description: "", price: "", category: "Mains", image: "" });
-    setEditingMealId(null);
-    notify(editingMealId ? "Menu item updated." : "Menu item added.");
+    try {
+      if (editingMealId) {
+        await apiRequest("/api/meals/" + encodeURIComponent(editingMealId), {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        });
+      } else {
+        await apiRequest("/api/kitchens/" + encodeURIComponent(ownerKitchenId) + "/meals", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+      }
+      await refreshKitchens();
+      setMealForm({ name: "", description: "", price: "", category: "Mains", image: "", imagePublicId: "" });
+      setEditingMealId(null);
+      setEditingMealAvailable(true);
+      notify(editingMealId ? "Menu item updated in Neon." : "Menu item added to Neon.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not save menu item.");
+    }
   }
 
   function editMeal(meal: Meal) {
     setEditingMealId(meal.id);
+    setEditingMealAvailable(meal.available);
     setMealForm({
       name: meal.name,
       description: meal.description,
       price: String(meal.price),
       category: meal.category,
       image: meal.image,
+      imagePublicId: meal.imagePublicId ?? "",
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function toggleAvailability(mealId: string) {
-    if (!ownerKitchenId) return;
-    setKitchens((current) => current.map((kitchen) => kitchen.id !== ownerKitchenId ? kitchen : {
-      ...kitchen,
-      meals: kitchen.meals.map((meal) => meal.id === mealId ? { ...meal, available: !meal.available } : meal),
-    }));
+  async function toggleAvailability(mealId: string) {
+    if (!ownerKitchenId || !ownerKitchen) return;
+    const meal = ownerKitchen.meals.find((item) => item.id === mealId);
+    if (!meal) return;
+    try {
+      await apiRequest("/api/meals/" + encodeURIComponent(mealId), {
+        method: "PATCH",
+        body: JSON.stringify({ available: !meal.available }),
+      });
+      await refreshKitchens();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not update availability.");
+    }
   }
 
-  function deleteMeal(mealId: string) {
+  async function deleteMeal(mealId: string) {
     if (!ownerKitchenId || !window.confirm("Remove this item from the menu?")) return;
-    setKitchens((current) => current.map((kitchen) => kitchen.id !== ownerKitchenId ? kitchen : {
-      ...kitchen,
-      meals: kitchen.meals.filter((meal) => meal.id !== mealId),
-    }));
-    setCart((current) => current.filter((line) => line.mealId !== mealId));
-    notify("Menu item removed.");
+    try {
+      await apiRequest<void>("/api/meals/" + encodeURIComponent(mealId), { method: "DELETE" });
+      setCart((current) => current.filter((line) => line.mealId !== mealId));
+      await refreshKitchens();
+      notify("Menu item deleted from Neon.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not delete menu item.");
+    }
   }
 
   function generateIdeas(event: FormEvent<HTMLFormElement>) {
@@ -466,6 +515,7 @@ export default function App() {
 
       {tab === "discover" && (
         <main>
+          {initialLoading && <div className="loading-strip">Connecting to the DZ Kitchen database…</div>}
           <section className="hero">
             <div className="hero-copy">
               <div className="eyebrow"><span className="eyebrow-spark">✳</span> YOUR NEIGHBOURHOOD, SERVED</div>
@@ -533,7 +583,7 @@ export default function App() {
           <button className="back-link" onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>← All kitchens</button>
           <section className="detail-hero">
             <div className="detail-photo"><img src={selectedKitchen.image} alt={selectedKitchen.name} /></div>
-            <div className="detail-copy"><span className="pill">{selectedKitchen.cuisine}</span><h1>{selectedKitchen.name}<span>.</span></h1><p>{selectedKitchen.description}</p><div className="detail-facts"><span>★ {selectedKitchen.rating.toFixed(1)} <small>community rating</small></span><span>⌖ {selectedKitchen.area}</span><span>◷ {selectedKitchen.delivery}</span></div><button className="text-button" onClick={() => beginOwner(selectedKitchen.id)}>Kitchen owner? <span>Edit storefront ↗</span></button></div>
+            <div className="detail-copy"><span className="pill">{selectedKitchen.cuisine}</span><h1>{selectedKitchen.name}<span>.</span></h1><p>{selectedKitchen.description}</p><div className="detail-facts"><span>★ {selectedKitchen.rating.toFixed(1)} <small>community rating</small></span><span>⌖ {selectedKitchen.area}</span><span>◷ {selectedKitchen.delivery}</span></div>{currentUser?.id === selectedKitchen.ownerId && <button className="text-button" onClick={() => beginOwner(selectedKitchen.id)}>Kitchen owner? <span>Edit storefront ↗</span></button>}</div>
           </section>
           <div className="section-heading menu-heading"><div><div className="eyebrow">MADE FRESH, JUST FOR YOU</div><h2>On the <em>menu.</em></h2></div><span className="results-count">{selectedKitchen.meals.filter((meal) => meal.available).length} available items</span></div>
           <div className="meal-grid">
@@ -554,20 +604,21 @@ export default function App() {
 
       {isOwner && (
         <main className="owner-page section-wrap">
-          <div className="owner-page-top"><button className="back-link" onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>← Back to marketplace</button><span className="demo-badge"><span /> DEMO WORKSPACE</span></div>
-          <div className="owner-intro"><div className="eyebrow">YOUR FOOD, YOUR STOREFRONT</div><h1>Make room for<br /><em>more orders.</em></h1><p>Set up your kitchen details and menu. Changes are saved in this browser demo.</p></div>
-          <div className="owner-notice"><span>ⓘ</span><p><strong>Preview workspace:</strong> this is a no-login demo backed by browser storage. It is not a secure vendor account system and changes are only stored in this browser.</p></div>
-          <div className="owner-layout">
-            <aside className="owner-sidebar"><div className="sidebar-heading">YOUR KITCHENS <span>{kitchens.length}</span></div><button className={!ownerKitchenId ? "sidebar-kitchen new active" : "sidebar-kitchen new"} onClick={() => beginOwner()}>＋ Create a kitchen</button>{kitchens.map((kitchen) => <button key={kitchen.id} className={ownerKitchenId === kitchen.id ? "sidebar-kitchen active" : "sidebar-kitchen"} onClick={() => beginOwner(kitchen.id)}><img src={kitchen.image} alt="" /><span><strong>{kitchen.name}</strong><small>{kitchen.area}</small></span><span className="sidebar-arrow">↗</span></button>)}</aside>
+          <div className="owner-page-top"><button className="back-link" onClick={() => { setTab("discover"); setSelectedKitchenId(null); }}>← Back to marketplace</button><span className="demo-badge"><span /> NEON DATABASE</span></div>
+          <div className="owner-intro"><div className="eyebrow">YOUR FOOD, YOUR STOREFRONT</div><h1>Make room for<br /><em>more orders.</em></h1><p>Create an owner account to manage a kitchen. Menus and storefront details save to the shared Neon database.</p>{currentUser && <div className="owner-account"><span>Signed in as <strong>{currentUser.displayName}</strong> · {currentUser.email}</span><button type="button" onClick={() => void signOut()}>Sign out ↗</button></div>}</div>
+          {!currentUser && <section className="owner-panel auth-panel"><div className="panel-top"><div><div className="eyebrow">OWNER ACCESS</div><h2>{authMode === "register" ? "Create your owner account" : "Welcome back"}</h2></div><span className="panel-number">↗</span></div><form className="owner-form" onSubmit={submitAuth}>{authMode === "register" && <label>Your name <input required minLength={2} maxLength={80} value={authForm.displayName} onChange={(event) => setAuthForm({ ...authForm, displayName: event.target.value })} placeholder="Your full name" /></label>}<label>Email address <input required type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} placeholder="you@example.com" autoComplete="email" /></label><label>Password <input required type="password" minLength={authMode === "register" ? 10 : 1} maxLength={128} value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} placeholder={authMode === "register" ? "At least 10 characters" : "Your password"} autoComplete={authMode === "register" ? "new-password" : "current-password"} /></label><div className="form-actions"><button className="button button-dark" disabled={authBusy} type="submit">{authBusy ? "Please wait…" : authMode === "register" ? "Create owner account" : "Sign in"} <span>→</span></button><button className="button button-outline" type="button" onClick={() => setAuthMode(authMode === "register" ? "login" : "register")}>{authMode === "register" ? "Already registered? Sign in" : "Create an account"}</button></div><small className="field-hint">Passwords are hashed on the server. Your session uses an HTTP-only cookie.</small></form></section>}
+          <div className="owner-notice" hidden={!currentUser}><span>ⓘ</span><p><strong>Connected workspace:</strong> changes are stored in Neon. Uploaded photos are stored in your Cloudinary account. Owners can only edit kitchens linked to their own account.</p></div>
+          <div className="owner-layout" hidden={!currentUser}>
+            <aside className="owner-sidebar"><div className="sidebar-heading">YOUR KITCHENS <span>{kitchens.filter((kitchen) => kitchen.ownerId === currentUser?.id).length}</span></div><button className={!ownerKitchenId ? "sidebar-kitchen new active" : "sidebar-kitchen new"} onClick={() => beginOwner()}>＋ Create a kitchen</button>{kitchens.filter((kitchen) => kitchen.ownerId === currentUser?.id).map((kitchen) => <button key={kitchen.id} className={ownerKitchenId === kitchen.id ? "sidebar-kitchen active" : "sidebar-kitchen"} onClick={() => beginOwner(kitchen.id)}><img src={kitchen.image} alt="" /><span><strong>{kitchen.name}</strong><small>{kitchen.area}</small></span><span className="sidebar-arrow">↗</span></button>)}</aside>
             <div className="owner-content">
               <section className="owner-panel"><div className="panel-top"><div><div className="eyebrow">01 / STORE DETAILS</div><h2>{ownerKitchenId ? "Your kitchen" : "Start your storefront"}</h2></div><span className="panel-number">01</span></div>
                 <form className="owner-form" onSubmit={saveKitchen}>
                   <label>Kitchen name <input required value={ownerForm.name} onChange={(event) => setOwnerForm({ ...ownerForm, name: event.target.value })} placeholder="e.g. Auntie's Kitchen" /></label>
                   <div className="form-two"><label>Neighbourhood / area <input required value={ownerForm.area} onChange={(event) => setOwnerForm({ ...ownerForm, area: event.target.value })} placeholder="e.g. Lekki Phase 1" /></label><label>Cuisine type <select value={ownerForm.cuisine} onChange={(event) => setOwnerForm({ ...ownerForm, cuisine: event.target.value })}>{["Nigerian", "Homestyle", "Italian", "Fast food", "Healthy", "Bakery", "Asian", "Caribbean", "Other"].map((cuisine) => <option key={cuisine}>{cuisine}</option>)}</select></label></div>
                   <label>Short description <textarea rows={3} value={ownerForm.description} onChange={(event) => setOwnerForm({ ...ownerForm, description: event.target.value })} placeholder="Tell neighbours what makes your food special." /></label>
-                  <label>Storefront image URL <input type="url" value={ownerForm.image} onChange={(event) => setOwnerForm({ ...ownerForm, image: event.target.value })} placeholder="https://example.com/your-food.jpg" /><small className="field-hint">This demo accepts an image URL. File uploads need a configured storage service.</small></label>
+                  <label>Storefront photo <input type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void uploadImage(file, "kitchen"); }} /><small className="field-hint">JPG, PNG, WEBP or AVIF · max 5 MB · {uploadingKitchen ? "Uploading…" : ownerForm.image ? "Photo ready" : "Choose a photo"}</small>{ownerForm.image && <img className="upload-preview" src={ownerForm.image} alt="Kitchen photo preview" />}</label>
                   <label>WhatsApp number <input value={ownerForm.whatsapp} onChange={(event) => setOwnerForm({ ...ownerForm, whatsapp: event.target.value })} placeholder="Country code + number, digits are saved" /><small className="field-hint">Use the number that should receive customer orders, with country code. It will be cleaned to digits.</small></label>
-                  <div className="form-actions"><button className="button button-dark" type="submit">{ownerKitchenId ? "Save kitchen details" : "Create kitchen"} <span>→</span></button>{ownerKitchenId && <button className="button button-outline" type="button" onClick={() => openKitchen(ownerKitchenId)}>Preview storefront ↗</button>}</div>
+                  <div className="form-actions"><button className="button button-dark" disabled={uploadingKitchen} type="submit">{ownerKitchenId ? "Save kitchen details" : "Create kitchen"} <span>→</span></button>{ownerKitchenId && <button className="button button-outline" type="button" onClick={() => openKitchen(ownerKitchenId)}>Preview storefront ↗</button>}</div>
                 </form>
               </section>
               {ownerKitchenId && (
@@ -577,8 +628,8 @@ export default function App() {
                       <label>Meal name <input required value={mealForm.name} onChange={(event) => setMealForm({ ...mealForm, name: event.target.value })} placeholder="e.g. Smoky party jollof" /></label>
                       <label>Description <textarea rows={2} value={mealForm.description} onChange={(event) => setMealForm({ ...mealForm, description: event.target.value })} placeholder="Describe ingredients, sides, and flavour." /></label>
                       <div className="form-two"><label>Price in naira (₦) <input required type="number" min="1" step="50" value={mealForm.price} onChange={(event) => setMealForm({ ...mealForm, price: event.target.value })} placeholder="4500" /></label><label>Category <input value={mealForm.category} onChange={(event) => setMealForm({ ...mealForm, category: event.target.value })} placeholder="Mains, Drinks, Sides..." /></label></div>
-                      <label>Meal image URL <input type="url" value={mealForm.image} onChange={(event) => setMealForm({ ...mealForm, image: event.target.value })} placeholder="https://example.com/meal.jpg" /></label>
-                      <div className="form-actions"><button className="button button-dark" type="submit">{editingMealId ? "Update menu item" : "Add to menu"} <span>＋</span></button>{editingMealId && <button className="button button-outline" type="button" onClick={() => { setEditingMealId(null); setMealForm({ name: "", description: "", price: "", category: "Mains", image: "" }); }}>Cancel edit</button>}</div>
+                      <label>Meal photo <input type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void uploadImage(file, "meal"); }} /><small className="field-hint">JPG, PNG, WEBP or AVIF · max 5 MB · {uploadingMeal ? "Uploading…" : mealForm.image ? "Photo ready" : "Choose a photo"}</small>{mealForm.image && <img className="upload-preview" src={mealForm.image} alt="Meal photo preview" />}</label>
+                      <div className="form-actions"><button className="button button-dark" disabled={uploadingMeal} type="submit">{editingMealId ? "Update menu item" : "Add to menu"} <span>＋</span></button>{editingMealId && <button className="button button-outline" type="button" onClick={() => { setEditingMealId(null); setMealForm({ name: "", description: "", price: "", category: "Mains", image: "", imagePublicId: "" }); setEditingMealAvailable(true); }}>Cancel edit</button>}</div>
                     </form>
                     <div className="managed-menu">{ownerKitchen?.meals.map((meal) => <div className="managed-meal" key={meal.id}><img src={meal.image} alt="" /><div className="managed-meal-copy"><strong>{meal.name}</strong><small>{money(meal.price)} · {meal.category}</small></div><button className={meal.available ? "availability available" : "availability"} onClick={() => toggleAvailability(meal.id)}>{meal.available ? "Available" : "Sold out"}</button><button className="small-icon-button" aria-label={"Edit " + meal.name} onClick={() => editMeal(meal)}>✎</button><button className="small-icon-button danger" aria-label={"Delete " + meal.name} onClick={() => deleteMeal(meal.id)}>×</button></div>)}
                       {!ownerKitchen?.meals.length && <p className="menu-empty">Your menu is empty. Add your first item above.</p>}
